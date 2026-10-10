@@ -1,0 +1,265 @@
+name: "Build and publish rootfs"
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'distro-build/**'
+      - 'scripts/**'
+      - 'bootstrap-rootfs.sh'
+      - '.github/workflows/build.yml'
+  pull_request:
+    paths:
+      - 'distro-build/**'
+      - 'scripts/**'
+      - 'bootstrap-rootfs.sh'
+      - '.github/workflows/build.yml'
+  workflow_dispatch:
+    inputs:
+      distributions:
+        description: 'Space-separated distributions to build (default: all)'
+        required: false
+      tag:
+        description: 'Release tag to publish under (default: latest git tag)'
+        required: false
+
+permissions:
+  # Needed to create the release and attach assets to it. A pull_request build gets
+  # the same permissions from the fork's token, which is read-only, so the publish step
+  # is additionally guarded on the event name below.
+  contents: write
+
+concurrency:
+  # Queued, not cancelled. These runs take hours and publish a release, so
+  # cancel-in-progress throws away the finished work of a run that is most of the
+  # way through: a run that had rebuilt fifteen of nineteen recipes was killed at
+  # the sixteenth by an unrelated one-line commit pushed three minutes later.
+  #
+  # The usual reason to cancel is that the later commit supersedes the earlier one.
+  # That does not hold here. A superseding push means the *recipes* to build
+  # changed; it does not mean the images already built are wrong, and they are
+  # published under a fixed tag that they do not vanish from. Let the earlier run
+  # finish and let the later one replace what it needs to.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # bootstrap-rootfs.sh derives the release version from the latest tag, so the
+          # tags have to be present. A shallow clone reports no tags at all, CURRENT_VERSION
+          # comes out empty, and every recipe refuses with "Cannot detect a release
+          # version" -- which is a green run that built nothing.
+          fetch-depth: 0
+
+      - name: Resolve release version
+        id: ver
+        run: |
+          set -euo pipefail
+          tag='${{ github.event.inputs.tag }}'
+          if [ -z "$tag" ]; then
+            tag=$(git tag --sort=-v:refname | head -n1)
+          fi
+          if [ -z "$tag" ]; then
+            echo "::error::No git tag found and no 'tag' input was given."
+            echo "::error::Pass one via the workflow_dispatch 'tag' input, or push a tag."
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          # Exported so bootstrap-rootfs.sh and generate-index.sh agree with the tag the
+          # assets are published under. Deriving it twice from the same source is how a
+          # build ends up stamped one version and published under another.
+          echo "ROOTFS_VERSION=$tag" >> "$GITHUB_ENV"
+          echo "Building for $tag"
+
+      - name: Decide which distributions to build
+        run: |
+          set -euo pipefail
+          # Deliberately not piped through `tee .build/...`. tee opens its output file
+          # when the pipeline starts, which is before the script has run its own
+          # `mkdir -p .build`, so tee fails on a missing directory and pipefail turns
+          # that into exit 1 with the full recipe list printed just above it -- which
+          # reads like a recipe was rejected. The script already writes .build/list.txt
+          # and echoes the list to stdout, so the tee bought nothing.
+          ./scripts/select-distributions.sh \
+            --event "${{ github.event_name }}" \
+            --base "origin/${{ github.base_ref }}" \
+            --input "${{ github.event.inputs.distributions }}"
+          echo "Building: $(tr '\n' ' ' < .build/list.txt)"
+
+      - name: Install build dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            curl jq sudo tar xz-utils binfmt-support qemu-user-static \
+            skopeo debootstrap arch-test
+          # Needed by the Debian-family recipes. Installed from the archive rather
+          # than apt because the version upstream pins is no longer current.
+          curl -fsSL -o /tmp/mmdebstrap.deb \
+            http://ftp.us.debian.org/debian/pool/main/m/mmdebstrap/mmdebstrap_1.5.7-3_all.deb
+          sudo dpkg -i /tmp/mmdebstrap.deb
+
+          # mmdebstrap is the one recipe that has to *run* target-architecture code:
+          # it executes maintainer scripts inside the target chroot. On an x86_64
+          # runner the aarch64 and arm images are foreign, so without qemu registered
+          # it refuses outright --
+          #
+          #   E: install arch-test for foreign architecture support
+          #
+          # which names debian.sh and nothing else. Installing qemu-user-static is not
+          # enough on its own: the handlers exist but are not enabled, so the
+          # executables are not reachable through binfmt_misc.
+          #
+          # This went unnoticed because the machine this was developed on is arm64 and
+          # already had both arch-test and its handlers registered, so it cross-built
+          # the other direction and never hit the condition.
+          sudo update-binfmts --enable
+          echo "Registered handlers:"
+          sudo ls /proc/sys/fs/binfmt_misc/ | grep -E 'qemu-(aarch64|arm)$'
+
+      - name: Build
+        run: |
+          set -uo pipefail
+
+          # Decided here, not in a step-level `if:`. hashFiles() is evaluated when the
+          # job starts, before any step has run, so .build/list.txt does not exist yet
+          # and any guard written against it is always false -- which silently skipped
+          # the build entirely and then reported "no images were produced", naming a
+          # recipe problem for what was a condition on the wrong expression.
+          if [ ! -s .build/list.txt ]; then
+            echo "No recipes selected; nothing to build."
+            exit 0
+          fi
+          # Each recipe is run separately, and a failure is recorded rather than
+          # allowed to end the run.
+          #
+          # Recipes are built in filename order, so a source that is unreachable
+          # fails at or near the start and takes everything after it with it. Adelie
+          # alone has cost every run so far at the first recipe, while nineteen other
+          # distributions that build perfectly were never attempted. One bad source
+          # must not be able to decide the fate of the whole release.
+          #
+          # The run still ends in failure if anything failed, and names what. It just
+          # publishes the recipes that worked first, so a broken mirror costs one
+          # distribution rather than all of them.
+          failed=""
+          while read -r recipe; do
+            [ -z "$recipe" ] && continue
+            echo "::group::Building $recipe"
+            # </dev/null is load-bearing, not hygiene. This loop reads the recipe
+            # list from .build/list.txt, and the recipe inherits that same stdin.
+            # Any recipe that prompts -- Chimera's `apk upgrade` asks "Do you want
+            # to continue [Y/n]?" -- consumes the rest of the list as its answer.
+            # It ate the first byte of the next line, so "debian" arrived as "ebian"
+            # and was rejected as a recipe that does not exist. The failure was
+            # reported against a recipe nobody had broken.
+            if ./bootstrap-rootfs.sh "$recipe" < /dev/null; then
+              echo "::endgroup::"
+              echo "OK $recipe"
+            else
+              echo "::endgroup::"
+              echo "FAILED $recipe"
+              failed="${failed}${recipe} "
+            fi
+          done < .build/list.txt
+
+          if [ -n "$failed" ]; then
+            echo "::error::These recipes failed: ${failed}"
+            echo "Building the ones that succeeded so their images are published."
+            echo "FAILED_RECIPES=${failed}" >> "$GITHUB_ENV"
+          fi
+
+          if [ -z "$(ls -1 rootfs/*.tar.xz 2>/dev/null)" ]; then
+            echo "::error::No images were produced by any recipe."
+            exit 1
+          fi
+
+      - name: Generate index
+        run: |
+          set -euo pipefail
+          # Skipped when the build produced nothing: a CI-only change selects no
+          # recipes, and this has nothing to index.
+          if [ -z "$(ls -1 rootfs/*.tar.xz 2>/dev/null)" ]; then
+            echo "No images were built; nothing to do."
+            exit 0
+          fi
+          ./scripts/generate-index.sh "${{ steps.ver.outputs.tag }}"
+
+      - name: Publish to the release
+        # A pull request builds and verifies but publishes nothing.
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.ver.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "$(ls -1 rootfs/*.tar.xz 2>/dev/null)" ]; then
+            echo "No images were built; nothing to publish."
+            exit 0
+          fi
+
+          # The tag is a fixed name that images are renewed under, so the release
+          # exists on every run after the first.
+          #
+          # Assets are replaced one at a time (--clobber deletes and re-uploads each
+          # same-named file) and everything else is left alone.
+          #
+          # Deleting the release and recreating it was here, and it destroyed the
+          # catalogue. Builds are incremental, so a run only produces the recipes it
+          # selected; recreate-the-whole-release therefore means each run keeps only
+          # what it happened to rebuild. A run that built pardus, parrot and trisquel
+          # published those and deleted chimera, which had been there working since
+          # the day before. Users lose distributions that were available, and the
+          # index agrees with the loss, so nothing reports it as missing.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG exists; replacing only the assets this build produced."
+            rm -rf .build/published
+            mkdir -p .build/published
+            gh release download "$TAG" --pattern 'index.json' --dir .build/published \
+              --clobber 2>/dev/null || echo "No published index yet; this run defines it."
+          else
+            echo "No release for $TAG yet; creating it."
+            gh release create "$TAG" --title "Rootfs $TAG" --generate-notes
+          fi
+
+          # An incremental run can only see the images it just built, so on its own it
+          # would publish an index listing three distributions and hide the rest.
+          if [ -f .build/published/index.json ]; then
+            python3 scripts/merge-index.py .build/published/index.json images/index.json
+          fi
+
+          # Unmatched globs stay literal under bash, so a recipe that produced nothing
+          # makes gh name a file that does not exist and the upload fails, rather than
+          # a release quietly missing images.
+          gh release upload "$TAG" images/index.json --clobber
+          # Images only. The distro-plugins/*.sh were uploaded because
+          # proot-distro's releases carry them and the layout was copied wholesale.
+          # Nothing in RedTerm reads them: ProotLaunch.kt and DistroSetup.kt
+          # generate launch.sh in Kotlin, and the app never downloads a plugin. They
+          # are only meaningful to someone running these images with upstream
+          # proot-distro, which is not what this repository publishes for.
+          #
+          # index.json is the exception and stays: RedTermCatalog fetches it from the
+          # release URL at runtime, and it is how the app learns which images exist.
+          gh release upload "$TAG" rootfs/*.tar.xz --clobber
+
+          echo "Release $TAG now carries $(gh release view "$TAG" --json assets --jq '.assets | length') assets"
+
+          echo "Published $(gh release view "$TAG" --json assets --jq '.assets | length') assets to $TAG"
+      - name: Report incomplete release
+        # Last, and with always(), because the point is to publish what succeeded
+        # first and only then fail the run. Placed before the publish it would exit 1
+        # and skip every remaining step, which is the exact outcome the per-recipe
+        # loop exists to avoid.
+        if: always() && env.FAILED_RECIPES != ''
+        run: |
+          echo "::error::Incomplete release. These recipes failed: ${FAILED_RECIPES}"
+          echo "The release contains only the recipes that succeeded."
+          exit 1

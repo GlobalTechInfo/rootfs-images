@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "version": "v0.6.0",
+  "generatedAt": "2026-10-09T05:36:41Z",
+  "images": [
+    {"distro": "gentoo", "arch": "aarch64", "upstreamVersion": "20261004T233054Z", "displayName": "Gentoo", "file": "gentoo-aarch64-rt-v0.6.0.tar.xz", "url": "https://github.com/GlobalTechInfo/rootfs-images/releases/download/v0.6.0/gentoo-aarch64-rt-v0.6.0.tar.xz", "baseUrlTemplate": "https://github.com/GlobalTechInfo/rootfs-images/releases/download/v0.6.0/gentoo-{arch}-rt-v0.6.0.tar.xz", "sha256": "b064721bfa5e50c56e5012d893c2d6c2a070e7cc8e5902c0f593f1641579e145", "size": 193985744, "buildVersion": "v0.6.0", "recipe": "distro-build/gentoo.sh"},
+    {"distro": "gentoo", "arch": "arm", "upstreamVersion": "20260902T220055Z", "displayName": "Gentoo", "file": "gentoo-arm-rt-v0.6.0.tar.xz", "url": "https://github.com/GlobalTechInfo/rootfs-images/releases/download/v0.6.0/gentoo-arm-rt-v0.6.0.tar.xz", "baseUrlTemplate": "https://github.com/GlobalTechInfo/rootfs-images/releases/download/v0.6.0/gentoo-{arch}-rt-v0.6.0.tar.xz", "sha256": "d7d37e89535c46d4078d52eb63787d30291aa3c558398f6f63667f4f382b389d", "size": 176641196, "buildVersion": "v0.6.0", "recipe": "distro-build/gentoo.sh"},
+    {"distro": "gentoo", "arch": "i686", "upstreamVersion": "20261006T170059Z", "displayName": "Gentoo", "file": "gentoo-i686-rt-v0.6.0.tar.xz", "url": "https://github.com/GlobalTechInfo/rootfs-images/releases/download/v0.6.0/gentoo-i686-rt-v0.6.0.tar.xz", "baseUrlTemplate": "https://github.com/GlobalTechInfo/rootfs-images/releases/download/v0.6.0/gentoo-{arch}-rt-v0.6.0.tar.xz", "sha256": "4b05c8c95a39a8aeb2c7227507b4735d136104bb3dc56b037b677dd97951ef71", "size": 232073224, "buildVersion": "v0.6.0", "recipe": "distro-build/gentoo.sh"},
+    {"distro": "gentoo", "arch": "x86_64", "upstreamVersion": "20261004T164559Z", "displayName": "Gentoo", "file": "gentoo-x86_64-rt-v0.6.0.tar.xz", "url": "https://github.com/GlobalTechInfo/rootfs-images/releases/download/v0.6.0/gentoo-x86_64-rt-v0.6.0.tar.xz", "baseUrlTemplate": "https://github.com/GlobalTechInfo/rootfs-images/releases/download/v0.6.0/gentoo-{arch}-rt-v0.6.0.tar.xz", "sha256": "4b4bf78c212d50845e5f4cc6bb0b543a78eb5c9cade5a6f6b6fbfe26437fd881", "size": 225138620, "buildVersion": "v0.6.0", "recipe": "distro-build/gentoo.sh"}
+  ]
+}
