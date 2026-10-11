@@ -45,6 +45,38 @@ bootstrap_distribution() {
 
 		"${SCRIPT_DIR}/trim-rootfs.sh" "${WORKDIR}/${rootfs_dir}"
 
+		# Rewrite the repository aliases so the image works on its own.
+		#
+		# Leap's .repo files are named and sectioned [openSUSE:repo-oss]. libzypp
+		# cannot cache a solv file for an alias containing a colon:
+		#
+		#   Can't open solv-file: /var/cache/zypp/solv/openSUSE:repo-oss/solv
+		#
+		# so every repository is skipped, the cache never builds, and the session has
+		# no packages at all -- "No provider of 'git' found" for everything.
+		#
+		# Done here rather than by the app: an image that is broken until a particular
+		# version of the app repairs it is not a working image. Three things have to
+		# change, not one -- the section header, the filename, and the parsed repo
+		# list in RepoManager.db, which keeps serving the old aliases even after the
+		# files are rewritten.
+		for rdir in /etc/zypp/repos.d /usr/share/zypp/repos.d; do
+			[ -d "${WORKDIR}/${rootfs_dir}${rdir}" ] || continue
+			for r in "${WORKDIR}/${rootfs_dir}${rdir}"/*.repo; do
+				[ -e "$r" ] || continue
+				sudo sed -i -e 's/^\[[^:]*:\(.*\)\]$/[\1]/' "$r"
+				b=$(basename "$r")
+				case "$b" in *:*) sudo mv "$r" "${WORKDIR}/${rootfs_dir}${rdir}/${b#*:}" ;; esac
+			done
+		done
+		sudo rm -f "${WORKDIR:?}/${rootfs_dir}/var/lib/zypp/RepoManager.db"
+
+		# The raw cache zypp creates read-only, so rm without this fails with
+		# "Operation not permitted" and the stale raw files survive, still naming the
+		# colon aliases. Removing the directory itself and letting it be recreated is
+		# the only way it actually goes.
+		sudo rm -rf "${WORKDIR:?}/${rootfs_dir}/var/cache/zypp"
+
 		image_meta "$tarball" "opensuse" "$arch" "${dist_version}" \
 			"\"displayName\": \"openSUSE Leap\"" \
 			"\"sourceImage\": \"docker.io/opensuse/leap:${dist_version}\"" \
