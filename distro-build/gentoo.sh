@@ -135,7 +135,12 @@ bootstrap_distribution() {
 		# version is the autobuild timestamp rather than a filename.
 		local up="${GENTOO_STAGE3_DATE:-${stage3#stage3-${profile}-}}"
 		up="${up%.tar.xz}"
-		image_meta "$tarball" "Gentoo" "$arch" "$up" \
+		# The distro key is lower case for every distribution. It was "Gentoo" here,
+		# which put the one capitalised key into the published index and left the app
+		# unable to match it -- the override silently did nothing while every other
+		# distro refreshed. displayName carries the capitalisation from here on.
+		image_meta "$tarball" "gentoo" "$arch" "$up" \
+			"\"displayName\": \"Gentoo\"" \
 			"\"recipe\": \"distro-build/gentoo.sh\"" \
 			"\"stage3\": \"${stage3}\"" \
 			"\"packageManager\": \"portage\""
