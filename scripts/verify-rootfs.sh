@@ -66,9 +66,16 @@ broken=0
 for d in bin usr/bin sbin usr/sbin; do
 	[ -d "${ROOTFS_DIR:?}/${d}" ] || continue
 	while IFS= read -r link; do
+		# -e follows the link, so a chain that resolves counts as working.
+		#
+		# find -xtype l cannot be used for this. It means "a symlink whose target is
+		# another symlink", which is true of every Debian alternatives entry --
+		# /usr/bin/sudo -> /etc/alternatives/sudo -> /usr/bin/sudo.real -- so it
+		# reports working commands as broken and fails a good build on them.
+		[ -e "$link" ] && continue
 		echo "[!] broken command: ${link#${ROOTFS_DIR}/} -> $(readlink "$link")"
 		broken=$(( broken + 1 ))
-	done < <(find "${ROOTFS_DIR}/${d}" -maxdepth 1 -xtype l 2>/dev/null)
+	done < <(find "${ROOTFS_DIR}/${d}" -maxdepth 1 -type l 2>/dev/null)
 done
 if [ "$broken" -ne 0 ]; then
 	echo "[!] ${broken} command(s) point at a path that does not exist." >&2

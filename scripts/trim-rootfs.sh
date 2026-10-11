@@ -191,3 +191,25 @@ fi
 if [ "$utf8_before" = "0" ] && [ "$utf8_after" = "0" ]; then
 	echo "  trim: no UTF-8 locale in this image to begin with (RedTerm will use LANG=C)" >&2
 fi
+
+# Dangling symlinks left behind by the trims above.
+#
+# Removing a directory does not remove the symlinks that pointed into it, so a
+# command can be left as a link to nothing. Gentoo shipped 70 of them: the binutils
+# cross-toolchain is trimmed away and /usr/bin/addr2line, /usr/bin/strings and
+# /usr/bin/ld.bfd are left pointing at it, each failing with "not found".
+#
+# A symlink with no target has no use to anything -- the content is already gone, and
+# unlike a hard link there is nothing that could still be referring to it. So these
+# are removed rather than left to fail at run time.
+dangling=0
+for d in bin usr/bin sbin usr/sbin; do
+	[ -d "${ROOTFS_DIR:?}/${d}" ] || continue
+	while IFS= read -r link; do
+		dangling=$(( dangling + 1 ))
+		sudo rm -f "$link"
+	done < <(find "${ROOTFS_DIR}/${d}" -maxdepth 1 -type l ! -exec test -e {} \; 2>/dev/null)
+done
+if [ "$dangling" -ne 0 ]; then
+	echo "  trim: removed ${dangling} symlink(s) left pointing at nothing."
+fi
