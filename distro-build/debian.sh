@@ -254,7 +254,27 @@ bootstrap_distribution() {
 				resolute) local meta_distro=ubuntu; local meta_upstream="26.04";;
 				*) echo "unknown suite '$suite'" >&2; exit 1;;
 			esac
-			image_meta "$tarball" "$meta_distro" "$arch" "$meta_upstream" \
+			# openssh-client's postinst does `chgrp _ssh`, and minbase has no such group.
+		#
+		# Not a build-time error: the image builds, verifies and trims. It appears the
+		# first time anything pulls openssh-client in -- git recommends it -- and then
+		# the package manager is left broken for every later install:
+		#
+		#   chgrp: bad group '_ssh'
+		#   E: Sub-process /usr/bin/dpkg returned an error code (1)
+		#
+		# Created only when absent, so an image that already has it is untouched.
+		if ! grep -q "^_ssh:" "${WORKDIR}/${rootfs_dir}/etc/group"; then
+			if sudo chroot "${WORKDIR}/${rootfs_dir}" groupadd --system _ssh 2>/dev/null; then
+				echo "  debian: created the _ssh system group for openssh's postinst."
+			else
+				sudo sed -i '1i _ssh:x:995:995::/run/sshd:/usr/sbin/nologin' \
+					"${WORKDIR}/${rootfs_dir}/etc/group"
+				echo "  debian: added the _ssh group to /etc/group directly."
+			fi
+		fi
+
+		image_meta "$tarball" "$meta_distro" "$arch" "$meta_upstream" \
 				"\"suite\": \"${suite}\"" \
 				"\"displayName\": \"$(suite_display_name "$suite")\"" \
 				"\"recipe\": \"distro-build/debian.sh\""

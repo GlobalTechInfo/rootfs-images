@@ -84,15 +84,32 @@ if [ -d "${ROOTFS_DIR}/rescue" ]; then
 	sudo rm -rf "${ROOTFS_DIR:?}/rescue"
 fi
 #
-# /usr/lib/cargo is Debian's and Ubuntu's vendored crates.io registry: 1.2G, about 92%
-# of resolute. It arrives not from the package list but from apt-get upgrade on a
-# release whose pending changeset is large -- minbase plus ca-certificates, locales
-# and sudo contains no Rust at all, and stable trixie from the identical recipe has no
-# /usr/lib/cargo directory. A build-time update pulling a 1.2G toolchain cache into a
-# phone image is the same class of problem as leaving a download cache behind, only
-# larger and harder to see.
-if [ -d "${ROOTFS_DIR}/usr/lib/cargo" ]; then
-	sudo rm -rf "${ROOTFS_DIR:?}/usr/lib/cargo"
+# /usr/lib/cargo holds two very different things, and removing the directory
+# removes both.
+#
+# registry/ is Debian's and Ubuntu's vendored crates.io cache: 1.2G, about 92% of
+# resolute. Nothing in a session reads it.
+#
+# bin/ is not a cache. The Rust `coreutils` package installs its binaries there, and
+# /bin is a symlink to /usr/bin, so ordinary commands resolve through it:
+#
+#   /usr/bin/chgrp    -> ../lib/cargo/bin/coreutils/chgrp
+#   /usr/bin/basename -> ../lib/cargo/bin/coreutils/basename
+#   /usr/bin/cat      -> ../lib/cargo/bin/coreutils/cat
+#
+# Deleting the directory leaves those pointing at nothing, and every one of them
+# fails with "not found". That surfaces as dpkg postinst failures --
+# openssh-client cannot `chgrp _ssh` -- and then as
+#
+#   E: Sub-process /usr/bin/dpkg returned an error code (1)
+#
+# which leaves the package manager broken for every later install.
+#
+# The saving was measured and the consequence was not: 1322M to 155M looked like a
+# pure win, and nothing checked whether the commands still ran. Only the registry is
+# removed now.
+if [ -d "${ROOTFS_DIR}/usr/lib/cargo/registry" ]; then
+	sudo rm -rf "${ROOTFS_DIR:?}/usr/lib/cargo/registry"
 fi
 
 # A distribution built for a board carries that board's kernel, and one that supports
