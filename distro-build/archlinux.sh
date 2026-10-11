@@ -58,6 +58,24 @@ bootstrap_distribution() {
 		sudo rm -f "${WORKDIR:?}/${rootfs_dir}/etc/resolv.conf"
 		sudo tee "${WORKDIR}/${rootfs_dir}/etc/resolv.conf" > /dev/null <<< "nameserver 1.1.1.1"
 
+		# Arch's base image ships no /etc/os-release -- only a one-byte
+		# /etc/arch-release -- and the trim does not remove it, so it was never there.
+		#
+		# RedTerm picks its first-start plan from ID=, so without this file Arch cannot
+		# be identified at all: no ID means no branch is taken and no pacman setup runs.
+		# Written only when absent, so a base that has a real one is left alone.
+		if [ ! -s "${WORKDIR:?}/${rootfs_dir}/etc/os-release" ]; then
+			sudo tee "${WORKDIR:?}/${rootfs_dir}/etc/os-release" > /dev/null <<-'RELEASE'
+				NAME="Arch Linux"
+				PRETTY_NAME="Arch Linux"
+				ID=arch
+				BUILD_ID=rolling
+				ANSI_COLOR="38;2;23;147;209"
+				HOME_URL="https://archlinux.org/"
+				SUPPORT_URL="https://bbs.archlinux.org/"
+			RELEASE
+		fi
+
 		# NO pacman invocation here, deliberately.
 		#
 		# The base images already carry bash, sh, glibc and 119 packages, and the
