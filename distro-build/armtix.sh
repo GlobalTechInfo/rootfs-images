@@ -82,6 +82,34 @@ bootstrap_distribution() {
 		"${SCRIPT_DIR}/bake-first-start.sh" "${WORKDIR}/${rootfs_dir}" "true"
 		"${SCRIPT_DIR}/trim-rootfs.sh" "${WORKDIR}/${rootfs_dir}"
 
+		# 422M of the 1.1G tree is /usr/lib/firmware, and roughly 260M of that is x86
+		# hardware: intel 123M, nvidia 105M, amdgpu 30M, i915 9.6M. None of it can
+		# load on the aarch64 phone this image runs on -- there is no x86 GPU to
+		# drive.
+		#
+		# It arrives because ARMtix packages the Arch linux-firmware blob wholesale,
+		# which covers every board and GPU vendor Linux supports in one package. No
+		# other distribution in this catalogue ships firmware at all, so this is
+		# ARMtix's upstream packaging rather than anything the trim left behind.
+		#
+		# The ARM wireless firmware stays. mediatek, ath10k/11k/12k, brcm and rtw89
+		# are what a phone's wifi and Bluetooth adapters load, and there is no
+		# substitute for them inside a session short of reinstalling the package.
+		#
+		# Kept here rather than in trim-rootfs.sh on purpose: scripts/ changes select
+		# all twenty recipes, and this rule is specific to an image that ships the
+		# full firmware blob. Put in the shared script it would rebuild the whole
+		# catalogue to change one distribution.
+		if [ -d "${WORKDIR}/${rootfs_dir}/usr/lib/firmware" ]; then
+			for v in intel nvidia amdgpu i915; do
+				if [ -d "${WORKDIR}/${rootfs_dir}/usr/lib/firmware/$v" ]; then
+					before=$(sudo du -sk "${WORKDIR}/${rootfs_dir}/usr/lib/firmware/$v" | cut -f1)
+					sudo rm -rf "${WORKDIR:?}/${rootfs_dir}/usr/lib/firmware/$v"
+					echo "  armtix: dropped x86 firmware /$v ($(( before / 1024 )) MB)"
+				fi
+			done
+		fi
+
 		image_meta "$tarball" "armtix" "$arch" "${dist_version}" \
 			"\"displayName\": \"ARMtix\"" \
 			"\"packageManager\": \"pacman\"" \
