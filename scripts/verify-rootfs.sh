@@ -51,3 +51,27 @@ if [ ! -r "$ROOTFS_DIR/etc/passwd" ]; then
 fi
 
 echo "  verify: ${LABEL} is a usable rootfs (/bin/sh resolves, /etc/passwd present)"
+
+# A command that exists but resolves to nothing.
+#
+# /bin/chgrp reported "not found" in a session while the file was present, because
+# it was a symlink into a directory the trim had removed. Every command in the PATH
+# can be broken this way and nothing here would notice: the files are all there, so
+# a file count and a checksum both pass.
+#
+# This is the check that would have caught it. Symlinks in the directories the PATH
+# uses are checked, and each is reported with its target so the cause is named rather
+# than left as "not found".
+broken=0
+for d in bin usr/bin sbin usr/sbin; do
+	[ -d "${ROOTFS_DIR:?}/${d}" ] || continue
+	while IFS= read -r link; do
+		echo "[!] broken command: ${link#${ROOTFS_DIR}/} -> $(readlink "$link")"
+		broken=$(( broken + 1 ))
+	done < <(find "${ROOTFS_DIR}/${d}" -maxdepth 1 -xtype l 2>/dev/null)
+done
+if [ "$broken" -ne 0 ]; then
+	echo "[!] ${broken} command(s) point at a path that does not exist." >&2
+	echo "[!] Each of them fails with 'not found' when run." >&2
+	exit 1
+fi
