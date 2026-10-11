@@ -47,8 +47,20 @@ def main() -> int:
     merged = {}
     for entry in published.get("images", []):
         merged[(entry.get("distro"), entry.get("arch"))] = entry
+
+    # Counted properly, because the previous version reported a difference in totals
+    # and called it "from this build". An incremental run replaces entries rather than
+    # adding them, so the total does not move: a run that rebuilt four images printed
+    # "0 from this build", which reads exactly like a run that built nothing at all.
+    replaced = 0
+    added = 0
     for entry in fresh.get("images", []):
-        merged[(entry.get("distro"), entry.get("arch"))] = entry
+        key = (entry.get("distro"), entry.get("arch"))
+        if key in merged:
+            replaced += 1
+        else:
+            added += 1
+        merged[key] = entry
 
     fresh["images"] = [
         merged[key] for key in sorted(merged, key=lambda k: (str(k[0]), str(k[1])))
@@ -59,10 +71,9 @@ def main() -> int:
         fh.write("\n")
 
     print(
-        "merge-index.py: {} images ({} published, {} from this build)".format(
-            len(fresh["images"]),
-            len(published.get("images", [])),
-            len(fresh["images"]) - len(published.get("images", [])),
+        "merge-index.py: {} images total ({} published before, "
+        "{} replaced and {} added by this build)".format(
+            len(fresh["images"]), len(published.get("images", [])), replaced, added
         )
     )
     return 0
