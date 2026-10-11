@@ -184,6 +184,7 @@ bootstrap_distribution() {
 				--keyring="${keydir}" \
 				--architectures="${deb_arch}" \
 				--variant=minbase \
+				--customize-hook='chroot "$1" dpkg --configure -a' \
 				--components="${components}" \
 				--include="ca-certificates,locales,sudo,${keyring_pkg}" \
 				--format=directory \
@@ -197,6 +198,19 @@ bootstrap_distribution() {
 			sudo rm -rf "${WORKDIR:?}/${rootfs_dir}/var/lib/apt/lists"/* || true
 			sudo rm -rf "${WORKDIR:?}/${rootfs_dir}/var/cache/apt/archives"/* || true
 
+			# mmdebstrap unpacks the included packages but does not finish configuring
+			# them, so sudo's postinst never runs. Its alternative is registered by that
+			# postinst, so the image gets
+			#
+			#   /usr/bin/sudo -> /etc/alternatives/sudo -> (nothing)
+			#
+			# and sudo fails with "not found". verify-rootfs.sh caught it on Ubuntu and not
+			# on Debian, which is the same recipe and the same --include list -- so this is
+			# mmdebstrap's handling of that suite, not a property of Debian-family.
+			#
+			# Configuring the packages completes every postinst, which is what registers
+			# the alternative. sudo has to work in every distro, so this is repaired rather
+			# than deleted.
 			# mmdebstrap writes resolv.conf itself; replace it with a plain one so the
 			# image carries no build-host state.
 			sudo rm -f "${WORKDIR:?}/${rootfs_dir}/etc/resolv.conf"
