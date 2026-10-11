@@ -122,10 +122,25 @@ fi
 # The firmware beside them is a different matter and stays. Modules load firmware into
 # real hardware, and that hardware exists inside a proot session -- a USB adapter or a
 # Bluetooth controller needs /usr/lib/firmware to work at all, and there is no
-# substitute for it short of reinstalling the package.
-if [ -d "${ROOTFS_DIR}/usr/lib/modules" ]; then
-	sudo rm -rf "${ROOTFS_DIR:?}/usr/lib/modules"
-fi
+	# /usr/lib/modules is NOT removed, and the reason it was looks convincing.
+	#
+	# The argument for deleting it was that proot passes syscalls through to the host
+	# kernel, so the image's own kernel is never loaded and its modules can never be
+	# inserted -- 439M on ARMtix that cannot be reached.
+	#
+	# That is true and it is irrelevant. Tools resolve the module tree by name whether
+	# or not a module is ever inserted, and a distro that ships them checks on every
+	# package operation. ARMtix's setup ran mkinitcpio and got, for both of its kernels:
+	#
+	#   ERROR: '/lib/modules/6.18.40-1-aarch64-lts-ARTIX' is not a valid kernel module directory
+	#
+	# so the image could not build its own initramfs -- broken in a way no amount of disk
+	# space compensates for.
+	#
+	# The firmware beside them is a different matter and stays. Modules load firmware into
+	# real hardware, and that hardware exists inside a proot session -- a USB adapter or
+	# a Bluetooth controller needs /usr/lib/firmware to work at all, and there is no
+	# substitute for it short of reinstalling the package.
 # Only the contents: /boot itself holds vmlinuz, initramfs and initramfs.img entries
 # alongside the directory holding the device trees, and the directory is the bulk of it.
 sudo find "${ROOTFS_DIR:?}/boot" -mindepth 1 -delete 2>/dev/null || true
