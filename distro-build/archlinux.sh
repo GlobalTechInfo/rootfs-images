@@ -65,7 +65,7 @@ bootstrap_distribution() {
 		# be identified at all: no ID means no branch is taken and no pacman setup runs.
 		# Written only when absent, so a base that has a real one is left alone.
 		if [ ! -s "${WORKDIR:?}/${rootfs_dir}/etc/os-release" ]; then
-			cat > "${WORKDIR}/${rootfs_dir}/etc/os-release" <<-'RELEASE'
+			sudo tee "${WORKDIR:?}/${rootfs_dir}/etc/os-release" > /dev/null <<-'RELEASE'
 				NAME="Arch Linux"
 				PRETTY_NAME="Arch Linux"
 				ID=arch
