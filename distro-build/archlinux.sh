@@ -86,6 +86,25 @@ bootstrap_distribution() {
 		"${SCRIPT_DIR}/bake-first-start.sh" "${WORKDIR}/${rootfs_dir}" "true"
 		"${SCRIPT_DIR}/trim-rootfs.sh" "${WORKDIR}/${rootfs_dir}"
 
+		# Remove the package database the bake just synchronised.
+		#
+		# It is a cache, and shipping a cache pins the image to whatever upstream had
+		# on the build day. ARMtix is a rolling release and moves quickly: an image
+		# baked with git-2.55.0-1 resolved that version long after the mirror had
+		# moved to 2.56.0-1 and deleted the old file, so `pacman -Syu` fetched a URL
+		# that returned 404 --
+		#
+		#   error: failed retrieving file 'git-2.55.0-1-aarch64.pkg.tar.xz'
+		#          from armtix.artixlinux.org : 404
+		#
+		# Every other package in the same transaction downloaded. Only the one whose
+		# version had moved on failed, which is what makes it look like a broken
+		# mirror rather than a stale snapshot.
+		#
+		# Deleted after the bake, not before it: the bake needs the database to install
+		# anything. Removing it leaves a first `pacman -Sy` to fetch the current one.
+		sudo rm -f "${WORKDIR:?}/${rootfs_dir}"/var/lib/pacman/sync/*.db 2>/dev/null || true
+
 		image_meta "$tarball" "arch" "$arch" "20260517" \
 			"\"displayName\": \"Arch Linux\"" \
 			"\"packageManager\": \"pacman\"" \
