@@ -129,6 +129,30 @@ bootstrap_distribution() {
 		# anything. Removing it leaves a first `pacman -Sy` to fetch the current one.
 		sudo rm -f "${WORKDIR:?}/${rootfs_dir}"/var/lib/pacman/sync/*.db 2>/dev/null || true
 
+		# pacman refuses to sync on a kernel without Landlock:
+		#
+		#   error: restricting filesystem access failed because Landlock is not
+		#          supported by the kernel!
+		#   error: switching to sandbox user 'alpm' failed!
+		#   error: failed to synchronize all databases
+		#
+		# Android has never implemented Landlock, so both fire on every device.
+		#
+		# Set here rather than by the app, for the same reason as the openSUSE
+		# repository rewrite: a repair in the app runs once, at first start, on
+		# whichever build the user happens to have installed. An image installed with
+		# an older app never gets it, and stays broken with nothing to indicate why.
+		# An image that is broken until a particular app build repairs it is not a
+		# working image.
+		#
+		# DisableSandbox covers Landlock. It says nothing about the second failure,
+		# which is pacman dropping privileges to the alpm user -- that user exists in
+		# the image, and the switch fails because proot has no working setuid.
+		# DownloadUser = root is the other half. Signature checking is untouched.
+		sudo sed -i '/^\[options\]/a DisableSandbox' "${WORKDIR}/${rootfs_dir}/etc/pacman.conf"
+		sudo sed -i -E 's/^[[:space:]]*#?[[:space:]]*DownloadUser[[:space:]]*=.*/DownloadUser = root/' \
+			"${WORKDIR}/${rootfs_dir}/etc/pacman.conf"
+
 		image_meta "$tarball" "armtix" "$arch" "${dist_version}" \
 			"\"displayName\": \"ARMtix\"" \
 			"\"packageManager\": \"pacman\"" \
