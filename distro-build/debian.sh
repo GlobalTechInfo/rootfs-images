@@ -1,5 +1,8 @@
 # Debian, current stable (trixie).
 #
+# Ubuntu is built by ubuntu.sh, not here. Sharing one file meant a fault in either
+# rebuilt both, and a change meant here was not a change to Debian alone.
+#
 # Modelled on termux/proot-distro's distro-build/debian.sh at commit 5bd8f4f.
 #
 # Differences from upstream, all deliberate:
@@ -39,7 +42,7 @@ dist_name="Debian"
 # There is deliberately no separate dist_version: the first version of this recipe
 # used one and every Ubuntu image came out named `resolute-aarch64-trixie-...`,
 # which is a filename that lies about what it contains.
-distro_suites="trixie resolute"
+distro_suites="trixie"
 
 # i686 exists for Debian but Ubuntu has not shipped it since 18.04.
 suites_i686() {
