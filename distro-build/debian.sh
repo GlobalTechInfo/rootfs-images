@@ -160,11 +160,28 @@ bootstrap_distribution() {
 			*) echo "debian.sh: no keyring package for suite '$suite'" >&2; return 1 ;;
 			esac
 
+			# Components differ per archive and a wrong one is not an error at build
+			# time -- it is written into sources.list and only fails later, in the
+			# session:
+			#
+			#   W: Skipping acquire of configured file 'contrib/binary-arm64/Packages'
+			#      as repository ... doesn't have the component 'contrib'
+			#   E: Unable to locate package nodejs
+			#
+			# Ubuntu has no contrib at all. It has restricted, universe and multiverse
+			# instead, and nodejs lives in universe -- so asking for main,contrib both
+			# produced the warning and omitted the component the package is in.
+			case "$suite" in
+			trixie)   components="main,contrib,non-free" ;;
+			resolute) components="main,restricted,universe,multiverse" ;;
+			*) echo "debian.sh: no component set for suite '$suite'" >&2; return 1 ;;
+			esac
+
 			sudo mmdebstrap \
 				--keyring="${keydir}" \
 				--architectures="${deb_arch}" \
 				--variant=minbase \
-				--components="main,contrib" \
+				--components="${components}" \
 				--include="ca-certificates,locales,sudo,${keyring_pkg}" \
 				--format=directory \
 				"${suite}" \
