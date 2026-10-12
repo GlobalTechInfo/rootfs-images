@@ -41,12 +41,22 @@ fi
 # A directory the owner cannot read is invisible to tar and to anything that lists it,
 # and several distributions ship mode 0400 directories. proot-distro's archive_rootfs
 # does this immediately before archiving; the same reasoning applies here.
+#
+# `-perm -0400` matches every directory whose owner can read, which is nearly all of
+# them, so the match is not evidence that anything needed changing -- Debian has no
+# unreadable directory at all and a loop that counted matches would have claimed to
+# repair 350. Only a directory whose mode actually moves to 755 is counted, and the
+# message says what really happened: those directories were readable, just not
+# group/world readable, and widening them is what makes tar's listing predictable.
 fixed=0
 while IFS= read -r dir; do
-	sudo chmod 755 "$dir" 2>/dev/null || true
+	before_mode=$(sudo stat -c '%a' "$dir" 2>/dev/null) || continue
+	[ "$before_mode" = "755" ] && continue
+	sudo chmod 755 "$dir" 2>/dev/null || continue
+	[ "$(sudo stat -c '%a' "$dir" 2>/dev/null)" = "755" ] || continue
 	fixed=$(( fixed + 1 ))
-done < <(sudo find "$ROOTFS_DIR" -type d -perm -400 -print0 2>/dev/null | xargs -0 -r -n1 printf '%s\n')
-[ "$fixed" -ne 0 ] && echo "  trim: made ${fixed} owner-unreadable director(y/ies) traversable."
+done < <(sudo find "$ROOTFS_DIR" -type d -perm -0400 2>/dev/null)
+[ "$fixed" -ne 0 ] && echo "  trim: widened ${fixed} director(y/ies) to mode 755."
 
 size_after=$(sudo du -sk "$ROOTFS_DIR" 2>/dev/null | cut -f1 || echo 0)
 
