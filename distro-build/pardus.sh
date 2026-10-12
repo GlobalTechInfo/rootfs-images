@@ -108,7 +108,7 @@ bootstrap_distribution() {
 
 		"${SCRIPT_DIR}/verify-rootfs.sh" "${WORKDIR}/${rootfs_dir}" "Pardus"
 		"${SCRIPT_DIR}/bake-first-start.sh" "${WORKDIR}/${rootfs_dir}" \
-			"apt-get update && apt-get -y upgrade"
+		"true"
 
 		"${SCRIPT_DIR}/trim-rootfs.sh" "${WORKDIR}/${rootfs_dir}"
 

@@ -99,7 +99,7 @@ bootstrap_distribution() {
 
 		"${SCRIPT_DIR}/verify-rootfs.sh" "${WORKDIR}/${rootfs_dir}" "Adélie Linux"
 		"${SCRIPT_DIR}/bake-first-start.sh" "${WORKDIR}/${rootfs_dir}" \
-			"apk upgrade --no-cache" \
+		"true" \
 			"apk add --no-cache bash"
 
 		"${SCRIPT_DIR}/trim-rootfs.sh" "${WORKDIR}/${rootfs_dir}"

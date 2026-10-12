@@ -57,7 +57,7 @@ bootstrap_distribution() {
 		# was a workaround for precisely this being absent.
 		"${SCRIPT_DIR}/verify-rootfs.sh" "${WORKDIR}/${rootfs_dir}" "Void Linux"
 		"${SCRIPT_DIR}/bake-first-start.sh" "${WORKDIR}/${rootfs_dir}" \
-			"xbps-install -Suy ca-certificates && xbps-install -y xbps && xbps-install -y bash && xbps-reconfigure -fa"
+		"true"
 
 		sudo rm -rf "${WORKDIR:?}/${rootfs_dir}/var/cache/xbps"/* 2>/dev/null || true
 

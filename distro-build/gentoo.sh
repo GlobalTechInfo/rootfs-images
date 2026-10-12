@@ -126,7 +126,7 @@ bootstrap_distribution() {
 		# already resolved.
 		"${SCRIPT_DIR}/verify-rootfs.sh" "${WORKDIR}/${rootfs_dir}" "Gentoo"
 		"${SCRIPT_DIR}/bake-first-start.sh" "${WORKDIR}/${rootfs_dir}" \
-			"true" \
+		"true" \
 			"emerge --oneshot --nodeps bash || true"
 
 		"${SCRIPT_DIR}/trim-rootfs.sh" "${WORKDIR}/${rootfs_dir}"

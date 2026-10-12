@@ -48,7 +48,7 @@ bootstrap_distribution() {
 		# Chimera is apk-based, so this is the same shape as Alpine's.
 		"${SCRIPT_DIR}/verify-rootfs.sh" "${WORKDIR}/${rootfs_dir}" "Chimera Linux"
 		"${SCRIPT_DIR}/bake-first-start.sh" "${WORKDIR}/${rootfs_dir}" \
-			"apk upgrade --no-cache --no-interactive" \
+		"true" \
 			"apk add --no-cache --no-interactive bash"
 
 		sudo rm -rf "${WORKDIR:?}/${rootfs_dir}/var/cache/apk"/* 2>/dev/null || true

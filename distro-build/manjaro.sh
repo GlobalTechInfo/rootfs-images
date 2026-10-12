@@ -91,7 +91,7 @@ bootstrap_arm() {
 		sudo rm -rf "${WORKDIR:?}/${rootfs_dir}/var/cache/pacman/pkg"/* 2>/dev/null || true
 
 		"${SCRIPT_DIR}/bake-first-start.sh" "${WORKDIR}/${rootfs_dir}" \
-			"pacman -Syy --noconfirm && pacman -Syu --noconfirm"
+		"true"
 
 		"${SCRIPT_DIR}/trim-rootfs.sh" "${WORKDIR}/${rootfs_dir}"
 
@@ -120,7 +120,7 @@ bootstrap_x86_64() {
 	sudo tee "${WORKDIR}/${rootfs_dir}/etc/resolv.conf" > /dev/null <<< "nameserver 1.1.1.1"
 
 	"${SCRIPT_DIR}/bake-first-start.sh" "${WORKDIR}/${rootfs_dir}" \
-		"pacman -Syy --noconfirm"
+		"true"
 	"${SCRIPT_DIR}/trim-rootfs.sh" "${WORKDIR}/${rootfs_dir}"
 
 	image_meta "$tarball" "manjaro" "x86_64" "20260322" \

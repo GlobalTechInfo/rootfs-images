@@ -259,7 +259,7 @@ bootstrap_distribution() {
 			# ">>> First-time distro setup".
 			"${SCRIPT_DIR}/verify-rootfs.sh" "${WORKDIR}/${rootfs_dir}" "Debian"
 			"${SCRIPT_DIR}/bake-first-start.sh" "${WORKDIR}/${rootfs_dir}" \
-				"apt-get update && apt-get -y upgrade"
+		"true"
 
 			# Trim last, so the update's own downloads are removed and the size
 			# reported is the size that ships.

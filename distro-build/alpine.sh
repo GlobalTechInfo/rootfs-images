@@ -90,7 +90,7 @@ bootstrap_distribution() {
 		# system update, bash, the sudo shim, and the /root/.init_done marker.
 		"${SCRIPT_DIR}/verify-rootfs.sh" "${WORKDIR}/${rootfs_dir}" "Alpine Linux"
 		"${SCRIPT_DIR}/bake-first-start.sh" "${WORKDIR}/${rootfs_dir}" \
-			"apk upgrade --no-cache" \
+		"true" \
 			"apk add --no-cache bash"
 
 		# Trim last, so the update's own downloads are removed and the reported size
