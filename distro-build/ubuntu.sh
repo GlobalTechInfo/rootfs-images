@@ -257,31 +257,6 @@ bootstrap_distribution() {
 			# system update, bash, the sudo shim, and the /root/.init_done marker.
 			# Without this the user's first terminal opens on a multi-minute
 			# ">>> First-time distro setup".
-			# Why is sudo dangling here, and only here?
-			#
-			# Two attempts to fix this have failed: the symlink check's -xtype was not the
-			# cause, and dpkg --configure -a during mmdebstrap runs every postinst and
-			# changes nothing. So stop guessing and print what dpkg and the alternatives
-			# database actually believe, which distinguishes the cases with different fixes:
-			#
-			#   * package unpacked but alternative not registered -> postinst did not run
-			#   * package absent entirely                       -> --include is not taking
-			#   * alternative points at a name the package does not ship in this release
-			#
-			# This is temporary instrumentation. It is recipe-local so it costs three images
-			# rather than twenty, and it comes out with the fix.
-			echo "  ubuntu: --- sudo diagnostic ---"
-			sudo chroot "${WORKDIR:?}/${rootfs_dir}" dpkg -l sudo 2>&1 | tail -2 | sed 's/^/    /' || true
-			echo "  ubuntu: dpkg -S /usr/bin/sudo:"
-			sudo chroot "${WORKDIR:?}/${rootfs_dir}" dpkg -S /usr/bin/sudo 2>&1 | sed 's/^/    /' || true
-			echo "  ubuntu: /usr/bin/sudo* on disk:"
-			sudo ls -l "${WORKDIR}/${rootfs_dir}"/usr/bin/sudo* 2>&1 | sed 's/^/    /' || true
-			echo "  ubuntu: /etc/alternatives/sudo* on disk:"
-			sudo ls -l "${WORKDIR}/${rootfs_dir}"/etc/alternatives/sudo* 2>&1 | sed 's/^/    /' || true
-			echo "  ubuntu: alternatives database entry:"
-			sudo cat "${WORKDIR}/${rootfs_dir}"/var/lib/dpkg/alternatives/sudo 2>&1 | sed 's/^/    /' || true
-			echo "  ubuntu: --- end diagnostic ---"
-
 			"${SCRIPT_DIR}/verify-rootfs.sh" "${WORKDIR}/${rootfs_dir}" "Debian"
 			"${SCRIPT_DIR}/bake-first-start.sh" "${WORKDIR}/${rootfs_dir}" \
 				"apt-get update && apt-get -y upgrade"

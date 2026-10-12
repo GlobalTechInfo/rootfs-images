@@ -52,6 +52,29 @@ fi
 
 echo "  verify: ${LABEL} is a usable rootfs (/bin/sh resolves, /etc/passwd present)"
 
+# A symlink is broken only if its target is missing *inside this rootfs*.
+#
+# Testing with [ -e ] is wrong, and wrong in a way that depends on the machine doing
+# the checking. Ubuntu links
+#
+#   /usr/bin/sudo -> /etc/alternatives/sudo -> /usr/bin/sudo.ws
+#
+# and that last target is absolute, so the kernel resolves it against the *host*
+# root. A developer machine with the sudo package installed has /usr/bin/sudo.ws and
+# passes; a CI runner without it fails the build. The image was correct in both cases
+# and the check disagreed with itself -- which is why this was found by a CI run and
+# not by the selftest that ran on the machine that happened to have sudo.ws.
+#
+# So the target is resolved by hand, against ROOTFS_DIR.
+link_resolves() {
+	local link="$1" target
+	target="$(readlink "$link" 2>/dev/null)" || return 1
+	case "$target" in
+		/*) [ -e "${ROOTFS_DIR}${target}" ] ;;
+		*)  [ -e "$(dirname "$link")/${target}" ] ;;
+	esac
+}
+
 # A command that exists but resolves to nothing.
 #
 # /bin/chgrp reported "not found" in a session while the file was present, because
@@ -72,7 +95,7 @@ for d in bin usr/bin sbin usr/sbin; do
 		# another symlink", which is true of every Debian alternatives entry --
 		# /usr/bin/sudo -> /etc/alternatives/sudo -> /usr/bin/sudo.real -- so it
 		# reports working commands as broken and fails a good build on them.
-		[ -e "$link" ] && continue
+			link_resolves "$link" && continue
 		echo "[!] broken command: ${link#${ROOTFS_DIR}/} -> $(readlink "$link")"
 		broken=$(( broken + 1 ))
 	done < <(find "${ROOTFS_DIR}/${d}" -maxdepth 1 -type l 2>/dev/null)
