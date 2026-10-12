@@ -207,6 +207,40 @@ if [ "$utf8_before" = "0" ] && [ "$utf8_after" = "0" ]; then
 	echo "  trim: no UTF-8 locale in this image to begin with (RedTerm will use LANG=C)" >&2
 fi
 
+# A symlink is broken only if its target is missing *inside this rootfs*.
+#
+# Testing with [ -e ] is wrong, and wrong in a way that depends on the machine doing
+# the checking. Ubuntu links
+#
+#   /usr/bin/sudo -> /etc/alternatives/sudo -> /usr/bin/sudo.ws
+#
+# and that last target is absolute, so the kernel resolves it against the *host*
+# root. A developer machine with the sudo package installed has /usr/bin/sudo.ws and
+# passes; a CI runner without it fails the build. The image was correct in both cases
+# and the check disagreed with itself -- which is why this was found by a CI run and
+# not by the selftest that ran on the machine that happened to have sudo.ws.
+#
+# So the target is resolved by hand, against ROOTFS_DIR.
+link_resolves() {
+	local path="$1" target depth=0
+	# The whole chain, not one hop. Ubuntu's is two:
+	#
+	#   /usr/bin/sudo -> /etc/alternatives/sudo -> /usr/bin/sudo.ws
+	#
+	# and the first hop lands on another symlink whose target is absolute, so testing
+	# it with [ -e ] resolves the *second* hop against the host again. One hop is not
+	# enough to escape the rootfs; the chain has to be walked to its end.
+	while [ -L "$path" ] && [ "$depth" -lt 40 ]; do
+		target="$(readlink "$path" 2>/dev/null)" || return 1
+		case "$target" in
+			/*) path="${ROOTFS_DIR}${target}" ;;
+			*)  path="$(dirname "$path")/${target}" ;;
+		esac
+		depth=$(( depth + 1 ))
+	done
+	[ -e "$path" ]
+}
+
 # Dangling symlinks left behind by the trims above.
 #
 # Removing a directory does not remove the symlinks that pointed into it, so a
@@ -223,7 +257,7 @@ for d in bin usr/bin sbin usr/sbin; do
 	while IFS= read -r link; do
 		dangling=$(( dangling + 1 ))
 		sudo rm -f "$link"
-	done < <(find "${ROOTFS_DIR}/${d}" -maxdepth 1 -type l ! -exec test -e {} \; 2>/dev/null)
+	done < <(find "${ROOTFS_DIR}/${d}" -maxdepth 1 -type l 2>/dev/null | while read -r l; do link_resolves "$l" || printf '%s\n' "$l"; done)
 done
 if [ "$dangling" -ne 0 ]; then
 	echo "  trim: removed ${dangling} symlink(s) left pointing at nothing."

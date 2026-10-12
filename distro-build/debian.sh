@@ -1,5 +1,8 @@
 # Debian, current stable (trixie).
 #
+# Ubuntu is built by ubuntu.sh, not here. Sharing one file meant a fault in either
+# rebuilt both, and a change meant here was not a change to Debian alone.
+#
 # Modelled on termux/proot-distro's distro-build/debian.sh at commit 5bd8f4f.
 #
 # Differences from upstream, all deliberate:
@@ -39,7 +42,7 @@ dist_name="Debian"
 # There is deliberately no separate dist_version: the first version of this recipe
 # used one and every Ubuntu image came out named `resolute-aarch64-trixie-...`,
 # which is a filename that lies about what it contains.
-distro_suites="trixie resolute"
+distro_suites="trixie"
 
 # i686 exists for Debian but Ubuntu has not shipped it since 18.04.
 suites_i686() {
@@ -181,6 +184,7 @@ bootstrap_distribution() {
 				--keyring="${keydir}" \
 				--architectures="${deb_arch}" \
 				--variant=minbase \
+				--customize-hook='chroot "$1" dpkg --configure -a' \
 				--components="${components}" \
 				--include="ca-certificates,locales,sudo,${keyring_pkg}" \
 				--format=directory \
@@ -194,6 +198,19 @@ bootstrap_distribution() {
 			sudo rm -rf "${WORKDIR:?}/${rootfs_dir}/var/lib/apt/lists"/* || true
 			sudo rm -rf "${WORKDIR:?}/${rootfs_dir}/var/cache/apt/archives"/* || true
 
+			# mmdebstrap unpacks the included packages but does not finish configuring
+			# them, so sudo's postinst never runs. Its alternative is registered by that
+			# postinst, so the image gets
+			#
+			#   /usr/bin/sudo -> /etc/alternatives/sudo -> (nothing)
+			#
+			# and sudo fails with "not found". verify-rootfs.sh caught it on Ubuntu and not
+			# on Debian, which is the same recipe and the same --include list -- so this is
+			# mmdebstrap's handling of that suite, not a property of Debian-family.
+			#
+			# Configuring the packages completes every postinst, which is what registers
+			# the alternative. sudo has to work in every distro, so this is repaired rather
+			# than deleted.
 			# mmdebstrap writes resolv.conf itself; replace it with a plain one so the
 			# image carries no build-host state.
 			sudo rm -f "${WORKDIR:?}/${rootfs_dir}/etc/resolv.conf"
