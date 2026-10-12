@@ -67,12 +67,23 @@ echo "  verify: ${LABEL} is a usable rootfs (/bin/sh resolves, /etc/passwd prese
 #
 # So the target is resolved by hand, against ROOTFS_DIR.
 link_resolves() {
-	local link="$1" target
-	target="$(readlink "$link" 2>/dev/null)" || return 1
-	case "$target" in
-		/*) [ -e "${ROOTFS_DIR}${target}" ] ;;
-		*)  [ -e "$(dirname "$link")/${target}" ] ;;
-	esac
+	local path="$1" target depth=0
+	# The whole chain, not one hop. Ubuntu's is two:
+	#
+	#   /usr/bin/sudo -> /etc/alternatives/sudo -> /usr/bin/sudo.ws
+	#
+	# and the first hop lands on another symlink whose target is absolute, so testing
+	# it with [ -e ] resolves the *second* hop against the host again. One hop is not
+	# enough to escape the rootfs; the chain has to be walked to its end.
+	while [ -L "$path" ] && [ "$depth" -lt 40 ]; do
+		target="$(readlink "$path" 2>/dev/null)" || return 1
+		case "$target" in
+			/*) path="${ROOTFS_DIR}${target}" ;;
+			*)  path="$(dirname "$path")/${target}" ;;
+		esac
+		depth=$(( depth + 1 ))
+	done
+	[ -e "$path" ]
 }
 
 # A command that exists but resolves to nothing.
