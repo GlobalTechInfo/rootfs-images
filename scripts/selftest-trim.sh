@@ -44,7 +44,8 @@ LABEL="${2:-$(basename "$SRC")}"
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
-DEST="$WORK/rootfs"
+ROOTFS_DIR="$WORK/rootfs"
+DEST="$ROOTFS_DIR"
 
 echo "=== trim selftest: $LABEL ==="
 
@@ -65,19 +66,41 @@ sudo rsync -a --quiet \
 # matters: /bin is a symlink to /usr/bin on Debian and Ubuntu, so a link in
 # usr/bin can break /bin too, and the broken link is still present, which is why
 # a file count and a checksum both pass.
+# Must match verify-rootfs.sh, or this harness cannot see what verify-rootfs.sh sees.
+#
+# It originally used [ -e ], which resolved an absolute symlink target against the
+# machine running the harness. That is how Ubuntu's sudo passed here and failed on a
+# CI runner, and why the harness reported "0 already broken" on an image that the
+# build called broken. The chain is walked instead, rebased onto the rootfs.
+link_resolves() {
+	local path="$1" target depth=0
+	while [ -L "$path" ] && [ "$depth" -lt 40 ]; do
+		target="$(readlink "$path" 2>/dev/null)" || return 1
+		case "$target" in
+			/*) path="${ROOTFS_DIR}${target}" ;;
+			*)  path="$(dirname "$path")/${target}" ;;
+		esac
+		depth=$(( depth + 1 ))
+	done
+	[ -e "$path" ]
+}
+
 usable_commands() {
 	local dir="$1"
 	find "$dir/bin" "$dir/usr/bin" "$dir/sbin" "$dir/usr/sbin" \
 		-maxdepth 1 -type l 2>/dev/null |
 	while read -r link; do
-		[ -e "$link" ] && printf '%s\n' "$link"
+		link_resolves "$link" && printf '%s\n' "$link"
 	done | sort
 }
 
 dangling_links() {
 	local dir="$1"
 	find "$dir/bin" "$dir/usr/bin" "$dir/sbin" "$dir/usr/sbin" \
-		-maxdepth 1 -type l ! -exec test -e {} \; 2>/dev/null | sort
+		-maxdepth 1 -type l 2>/dev/null |
+	while read -r link; do
+		link_resolves "$link" || printf '%s\n' "$link"
+	done | sort
 }
 
 usable_commands "$DEST" > "$WORK/before.txt"
