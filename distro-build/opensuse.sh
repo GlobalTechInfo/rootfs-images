@@ -64,9 +64,29 @@ bootstrap_distribution() {
 			[ -d "${WORKDIR}/${rootfs_dir}${rdir}" ] || continue
 			for r in "${WORKDIR}/${rootfs_dir}${rdir}"/*.repo; do
 				[ -e "$r" ] || continue
-				sudo sed -i -e 's/^\[[^:]*:\(.*\)\]$/[\1]/' "$r"
-				b=$(basename "$r")
-				case "$b" in *:*) sudo mv "$r" "${WORKDIR}/${rootfs_dir}${rdir}/${b#*:}" ;; esac
+sudo sed -i -e 's/^\[[^:]*:\(.*\)\]$/[\1]/' "$r"
+			b=$(basename "$r")
+			case "$b" in *:*) sudo mv "$r" "${WORKDIR}/${rootfs_dir}${rdir}/${b#*:}" ;; esac
+			# Detach the repo from its libzypp service.
+			#
+			# This is the part that actually decides the alias, and rewriting the
+			# section header above never had a chance against it. Every Leap .repo
+			# ends with `service=openSUSE`, and libzypp namespaces a serviced repo
+			# as `service:alias`. So the repository keeps the alias `openSUSE:repo-oss`
+			# no matter what its section header or filename says -- which is exactly
+			# what a session showed:
+			#
+			#   Looking for gpg keys in repository repo-oss (16.0).
+			#   Error building the cache:
+			#   Can't open solv-file: /var/cache/zypp/solv/openSUSE:repo-oss/solv
+			#
+			# The name= line above is why that looks contradictory: the display name
+			# is clean while the alias is not. The files even say so at the top:
+			# "Manual changes may be overwritten by a service refresh."
+			#
+			# With the service detached, the repo is an ordinary one, keeps the alias
+			# in its own header, and no refresh can put the colon back.
+			sudo sed -i -e '/^[[:space:]]*service[[:space:]]*=/d' "$r"
 			done
 		done
 		sudo rm -f "${WORKDIR:?}/${rootfs_dir}/var/lib/zypp/RepoManager.db"
