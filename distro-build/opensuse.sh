@@ -89,6 +89,18 @@ sudo sed -i -e 's/^\[[^:]*:\(.*\)\]$/[\1]/' "$r"
 			# and this sed would then fail on a path that no longer exists:
 			#   sed: can't read .../openSUSE:repo-non-oss-debug.repo: No such file or directory
 			sudo sed -i -e '/^[[:space:]]*service[[:space:]]*=/d' "$r"
+			# https, not http. A timeout on the way in is the one openSUSE
+			# failure left on the device:
+			#
+			#   [repo-oss|http://cdn.opensuse.org/...] Failed to retrieve new repository metadata.
+			#   Timeout reached Curl error (28)
+			#
+			# The alias problem is fixed by this point -- the solv path in that
+			# error is already clean -- so this is the network, and plain http adds a
+			# redirect hop for no benefit. Verified reachable both ways:
+			#   http  200 0.83s   https 200 0.88s
+			sudo sed -i -e 's|^baseurl=http://cdn\.opensuse\.org|baseurl=https://download.opensuse.org|' "$r"
+			sudo sed -i -e 's|^gpgkey=http://cdn\.opensuse\.org|gpgkey=https://download.opensuse.org|' "$r"
 			b=$(basename "$r")
 			case "$b" in *:*) sudo mv "$r" "${WORKDIR}/${rootfs_dir}${rdir}/${b#*:}" ;; esac
 			done
