@@ -215,7 +215,7 @@ bootstrap_distribution() {
 		sudo mkdir -p "${WORKDIR}/${rootfs_dir}/etc/pacman.d"
 		sudo sed -i '/^[[:space:]]*#*[[:space:]]*NoExtract[[:space:]]*=/d' \
 			"${WORKDIR}/${rootfs_dir}/etc/pacman.conf"
-		sudo sed -i '/^\[options\]/a NoExtract = usr/share/man/* usr/share/doc/* usr/share/info/* usr/share/locale/*' \
+		sudo sed -i '/^\[options\]/a NoExtract = usr/share/man/* usr/share/doc/* usr/share/info/* usr/share/locale/* usr/share/libalpm/hooks/*systemd*.hook usr/share/libalpm/hooks/20-esysusers.hook usr/share/libalpm/hooks/21-etmpfiles.hook usr/share/libalpm/hooks/25-udev-hwdb.hook usr/share/libalpm/hooks/30-binfmt.hook usr/share/libalpm/hooks/30-sysctl.hook usr/share/libalpm/hooks/35-udev-reload.hook' \
 			"${WORKDIR}/${rootfs_dir}/etc/pacman.conf"
 
 		image_meta "$tarball" "arch" "$arch" "20260517" \
