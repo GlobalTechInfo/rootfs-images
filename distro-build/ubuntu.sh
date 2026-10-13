@@ -302,6 +302,36 @@ chroot "${WORKDIR}/${rootfs_dir}" dpkg-reconfigure locales
 			done
 			sudo ln -sfn /usr/sbin/gnuchroot "${WORKDIR:?}/${rootfs_dir}/usr/bin/chroot"
 
+			# Nothing must be left pointing into the tree that was just removed.
+			#
+			# The loop above only covers commands that have a GNU counterpart, so the
+			# eight uutils extensions kept their old symlinks and became dangling.
+			# verify-rootfs.sh is right to reject the image for this:
+			#
+			#   [!] broken command: usr/bin/sha3-512sum -> ../lib/cargo/bin/coreutils/sha3-512sum
+			#   [!] 8 command(s) point at a path that does not exist.
+			#   [!] Each of them fails with 'not found' when run.
+			#
+			# hashsum is the one worth keeping: uutils defines it as an alias for
+			# sha256sum, so that is what it points at. The other seven -- sha3sum and
+			# its four variants, shake128sum, shake256sum -- are uutils extensions GNU
+			# coreutils does not implement at all, and nothing in a terminal session
+			# calls them. They are removed rather than left as broken names.
+			hashsum_target="${WORKDIR}/${rootfs_dir}/usr/bin/hashsum"
+			if [ -L "$hashsum_target" ] && [ ! -e "$hashsum_target" ] &&
+				[ -e "${WORKDIR}/${rootfs_dir}/usr/bin/gnusha256sum" ]; then
+				sudo ln -sfn gnusha256sum "$hashsum_target"
+			fi
+
+			# Then sweep, so anything missed above cannot ship.
+			sudo find "${WORKDIR}/${rootfs_dir}/usr/bin" -maxdepth 1 -type l -print0 |
+				while IFS= read -r -d '' link; do
+					[ -e "$link" ] && continue
+					case "$(sudo readlink "$link")" in
+						*cargo*) sudo rm -f "$link"; echo "    dropped dangling ${link##*/}" ;;
+					esac
+				done
+
 			# Bake what RedTerm would otherwise do on the user's first launch: the
 			# system update, bash, the sudo shim, and the /root/.init_done marker.
 			# Without this the user's first terminal opens on a multi-minute
