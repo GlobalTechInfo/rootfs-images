@@ -179,26 +179,44 @@ bootstrap_distribution() {
 		# No systemd ever runs in these sessions, so there is nothing for any of them
 		# to do. What is given up is update-ca-trust and depmod: the trust store is
 		# already populated by the build, and a session cannot load kernel modules.
-		# Remove the systemd ALPM hooks rather than repointing HookDir.
+		# Disable ALPM hooks by pointing HookDir at a real, empty directory.
 		#
-		# `HookDir = /dev/null` is not a way to disable hooks. pacman scandir()s
-		# whatever HookDir names, /dev/null is not a directory, and it aborts the
-		# whole transaction:
-		#
+		# `HookDir = /dev/null` is not a way to do this: pacman scandir()s whatever
+		# HookDir names, /dev/null is not a directory, and the transaction dies with
 		#   error: could not open directory: /dev/null/: Not a directory
 		#   error: failed to commit transaction (failed to run transaction hooks)
-		#   Errors occurred, no packages were upgraded.
+		# which is worse than the noise it was meant to remove.
 		#
-		# That is strictly worse than the noise it was meant to remove, because the
-		# hooks only ever failed *after* a successful install.
+		# Deleting the hook files works too, but not for long: upgrading systemd
+		# reinstalls all eleven, and they are back on the next transaction. An empty
+		# directory survives that, and it also covers hooks from packages we have
+		# never seen.
 		#
-		# The hooks are files, so deleting them is what stops them running, and it
-		# leaves /usr/share/libalpm/hooks a valid directory.
+		# Verified here that this replaces the backend directory rather than adding
+		# to it: a probe hook placed in /usr/share/libalpm/hooks did not run, while the
+		# transaction itself proceeded normally.
+		sudo mkdir -p "${WORKDIR}/${rootfs_dir}/etc/pacman.d/hooks"
+		sudo find "${WORKDIR}/${rootfs_dir}/etc/pacman.d/hooks" -mindepth 1 -delete 2>/dev/null || true
+		sudo sed -i '/^[[:space:]]*#*[[:space:]]*HookDir[[:space:]]*=/d' \
+			"${WORKDIR}/${rootfs_dir}/etc/pacman.conf"
+		sudo sed -i '/^\[options\]/a HookDir = /etc/pacman.d/hooks' "${WORKDIR}/${rootfs_dir}/etc/pacman.conf"
+
+		# Do not extract man pages, documentation or locale catalogues.
 		#
-		# A package that owns one of these restores it on upgrade, which brings the
-		# error lines back; the transaction still succeeds.
-		sudo find "${WORKDIR}/$${rootfs_dir}/usr/share/libalpm/hooks" -maxdepth 1 -type f \
-			-name '*-systemd-*.hook' -delete 2>/dev/null || true
+		# The trim removes them to keep the image small, but the packages still claim
+		# them, so every upgrade of curl, systemd or anything else re-checks files that
+		# are no longer there and prints one line per file:
+		#
+		#   warning: could not get file information for usr/share/man/man3/CURLOPT_MAXFILESIZE.3.gz
+		#
+		# hundreds of them, for a file nobody will ever read. NoExtract says the files
+		# are not ours to begin with, so pacman neither writes them nor complains that
+		# they are missing.
+		sudo mkdir -p "${WORKDIR}/${rootfs_dir}/etc/pacman.d"
+		sudo sed -i '/^[[:space:]]*#*[[:space:]]*NoExtract[[:space:]]*=/d' \
+			"${WORKDIR}/${rootfs_dir}/etc/pacman.conf"
+		sudo sed -i '/^\[options\]/a NoExtract = usr/share/man/* usr/share/doc/* usr/share/info/* usr/share/locale/*' \
+			"${WORKDIR}/${rootfs_dir}/etc/pacman.conf"
 
 		image_meta "$tarball" "arch" "$arch" "20260517" \
 			"\"displayName\": \"Arch Linux\"" \
