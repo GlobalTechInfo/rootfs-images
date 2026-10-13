@@ -101,6 +101,21 @@ sudo sed -i -e 's/^\[[^:]*:\(.*\)\]$/[\1]/' "$r"
 		# the only way it actually goes.
 		sudo rm -rf "${WORKDIR:?}/${rootfs_dir}/var/cache/zypp"
 
+		# Recreate the tree the deletion removed.
+		#
+		# libzypp will not create the per-repository cache directory itself, so an
+		# image shipped without these cannot cache a solv file at all:
+		#
+		#   Error building the cache:
+		#   Can't open solv-file: /var/cache/zypp/solv/repo-oss/solv
+		#
+		# Doing it here as well as in the app means a fresh image works on its own,
+		# rather than only after a particular app build has run once.
+		sudo mkdir -p \
+			"${WORKDIR:?}/${rootfs_dir}/var/cache/zypp/solv" \
+			"${WORKDIR:?}/${rootfs_dir}/var/cache/zypp/raw" \
+			"${WORKDIR:?}/${rootfs_dir}/var/cache/zypp/packages"
+
 		image_meta "$tarball" "opensuse" "$arch" "${dist_version}" \
 			"\"displayName\": \"openSUSE Leap\"" \
 			"\"sourceImage\": \"docker.io/opensuse/leap:${dist_version}\"" \

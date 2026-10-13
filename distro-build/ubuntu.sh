@@ -249,9 +249,58 @@ bootstrap_distribution() {
 				mount --bind /dev "${WORKDIR}/${rootfs_dir}/dev"
 				mount --bind /proc "${WORKDIR}/${rootfs_dir}/proc"
 				mount --bind /sys "${WORKDIR}/${rootfs_dir}/sys"
-				chroot "${WORKDIR}/${rootfs_dir}" dpkg-reconfigure locales
-				chroot "${WORKDIR}/${rootfs_dir}" apt-get clean
+chroot "${WORKDIR}/${rootfs_dir}" dpkg-reconfigure locales
+			chroot "${WORKDIR}/${rootfs_dir}" apt-get clean
+
+			# Use the GNU coreutils Ubuntu already ships, and drop the Rust one.
+			#
+			# resolute installs four packages here:
+			#
+			#   rust-coreutils        3371 files, 1167 MB, in /usr/lib/cargo
+			#   coreutils-from-uutils   113 /usr/bin/* symlinks -> the Rust build
+			#   gnu-coreutils           363 files, the real GNU binaries at /usr/bin/gnu*
+			#   coreutils                  7 files, a transitional metapackage
+			#
+			# So Ubuntu ships a complete GNU coreutils, installed and unused, while
+			# /usr/bin/cat resolves into the 1167 MB Rust tree. That single tree is
+			# 1223 MB of a 1291 MB image -- 95% of it.
+			#
+			# The Rust tree cannot simply be deleted, which is why earlier attempts to
+			# shrink this image stopped: /usr/bin/cat, /usr/bin/chmod and 106 other
+			# commands are symlinks into it, so removing it leaves a small image with
+			# no working coreutils at all.
+			#
+			# Pointing them at the GNU binaries instead is the whole fix.
+			#
+			# Order matters, and it is the reverse of what looks obvious.
+			# coreutils-from-uutils Depends on rust-coreutils, so purging the Rust
+			# package first leaves the symlink farm pointing at nothing -- 108 dangling
+			# symlinks and an image that cannot run cat. The farm goes first, and the
+			# metapackage with it: it requires coreutils-from-gnu, which is not in the
+			# archive, so leaving it makes `apt-get check` report unmet dependencies.
+			chroot "${WORKDIR}/${rootfs_dir}" dpkg --purge --force-all coreutils-from-uutils
+			chroot "${WORKDIR}/${rootfs_dir}" dpkg --purge --force-depends rust-coreutils
+			chroot "${WORKDIR}/${rootfs_dir}" dpkg --purge --force-all coreutils
 			EOF
+
+			# 104 of the 113 commands have a direct GNU binary. The rest are uutils
+			# extensions with no counterpart -- hashsum, sha3-224sum, sha3-256sum,
+			# sha3-384sum, sha3-512sum, sha3sum, shake128sum, shake256sum -- and
+			# chroot, which GNU ships as /usr/sbin/gnuchroot.
+			#
+			# Symlinks, not copies: the GNU binaries stay where dpkg put them, so an
+			# upgrade of gnu-coreutils replaces the targets and every command follows.
+			for g in "${WORKDIR}/${rootfs_dir}"/usr/bin/gnu*; do
+				[ -e "$g" ] || continue
+				t="${g##*/gnu}"
+				[ -n "$t" ] || continue
+				target="${WORKDIR}/${rootfs_dir}/usr/bin/${t}"
+				if [ ! -e "$target" ] || { [ -L "$target" ] && [ ! -e "$target" ]; }; then
+					sudo rm -f "$target"
+					sudo ln -s "${g##*/}" "$target"
+				fi
+			done
+			sudo ln -sfn /usr/sbin/gnuchroot "${WORKDIR:?}/${rootfs_dir}/usr/bin/chroot"
 
 			# Bake what RedTerm would otherwise do on the user's first launch: the
 			# system update, bash, the sudo shim, and the /root/.init_done marker.

@@ -106,9 +106,26 @@ bootstrap_distribution() {
 		#   error: command failed to execute correctly
 		# and every transaction ends that way. No systemd runs in these sessions, so
 		# no hook has anything to do.
-		sudo sed -i '/^[[:space:]]*#*[[:space:]]*HookDir[[:space:]]*=/d' \
-			"${WORKDIR}/${rootfs_dir}/etc/pacman.conf"
-		sudo sed -i '/^\[options\]/a HookDir = /dev/null' "${WORKDIR}/${rootfs_dir}/etc/pacman.conf"
+		# Remove the systemd ALPM hooks rather than repointing HookDir.
+		#
+		# `HookDir = /dev/null` is not a way to disable hooks. pacman scandir()s
+		# whatever HookDir names, /dev/null is not a directory, and it aborts the
+		# whole transaction:
+		#
+		#   error: could not open directory: /dev/null/: Not a directory
+		#   error: failed to commit transaction (failed to run transaction hooks)
+		#   Errors occurred, no packages were upgraded.
+		#
+		# That is strictly worse than the noise it was meant to remove, because the
+		# hooks only ever failed *after* a successful install.
+		#
+		# The hooks are files, so deleting them is what stops them running, and it
+		# leaves /usr/share/libalpm/hooks a valid directory.
+		#
+		# A package that owns one of these restores it on upgrade, which brings the
+		# error lines back; the transaction still succeeds.
+		sudo find "${WORKDIR}/$${rootfs_dir}/usr/share/libalpm/hooks" -maxdepth 1 -type f \
+			-name '20-esysusers.hook' -o -name '21-etmpfiles.hook' -o -name '25-udev-hwdb.hook' -o -name '30-binfmt.hook' -o -name '30-sysctl.hook' -o -name '35-udev-reload.hook' -delete 2>/dev/null || true
 
 		"${SCRIPT_DIR}/verify-rootfs.sh" "${WORKDIR}/${rootfs_dir}" "ARMtix"
 		"${SCRIPT_DIR}/bake-first-start.sh" "${WORKDIR}/${rootfs_dir}" "true"
