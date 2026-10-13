@@ -95,6 +95,33 @@ sudo sed -i -e 's/^\[[^:]*:\(.*\)\]$/[\1]/' "$r"
 		done
 		sudo rm -f "${WORKDIR:?}/${rootfs_dir}/var/lib/zypp/RepoManager.db"
 
+		# Remove the libzypp service. This, not the .repo files, is what puts the
+		# colon back.
+		#
+		# /etc/zypp/services.d/openSUSE.service is the source of truth:
+		#
+		#   [openSUSE]
+		#   enabled=1
+		#   autorefresh=1
+		#   url = dir:/usr/share/zypp/local/service/openSUSE
+		#   repo_4=openSUSE:repo-oss
+		#
+		# autorefresh=1 means every zypper command re-runs the service, which
+		# rewrites the .repo files from that directory with the original aliases. So
+		# rewriting the section headers above survives exactly until the next
+		# `zypper refresh`, which is what happened on the device:
+		#
+		#   Refreshing service 'openSUSE'.
+		#   Error building the cache:
+		#   Can't open solv-file: /var/cache/zypp/solv/openSUSE:repo-oss/solv
+		#
+		# Removing the service leaves ordinary repos, whose alias is the one in their
+		# own header, and nothing regenerates them.
+		sudo rm -f "${WORKDIR:?}/${rootfs_dir}/etc/zypp/services.d/openSUSE.service" \
+			2>/dev/null || true
+		sudo rm -rf "${WORKDIR:?}/${rootfs_dir}/usr/share/zypp/local/service/openSUSE" \
+			2>/dev/null || true
+
 		# The raw cache zypp creates read-only, so rm without this fails with
 		# "Operation not permitted" and the stale raw files survive, still naming the
 		# colon aliases. Removing the directory itself and letting it be recreated is
