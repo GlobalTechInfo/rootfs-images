@@ -65,8 +65,6 @@ bootstrap_distribution() {
 			for r in "${WORKDIR}/${rootfs_dir}${rdir}"/*.repo; do
 				[ -e "$r" ] || continue
 sudo sed -i -e 's/^\[[^:]*:\(.*\)\]$/[\1]/' "$r"
-			b=$(basename "$r")
-			case "$b" in *:*) sudo mv "$r" "${WORKDIR}/${rootfs_dir}${rdir}/${b#*:}" ;; esac
 			# Detach the repo from its libzypp service.
 			#
 			# This is the part that actually decides the alias, and rewriting the
@@ -86,7 +84,13 @@ sudo sed -i -e 's/^\[[^:]*:\(.*\)\]$/[\1]/' "$r"
 			#
 			# With the service detached, the repo is an ordinary one, keeps the alias
 			# in its own header, and no refresh can put the colon back.
+			#
+			# Before the rename below, because that moves the file out from under $r
+			# and this sed would then fail on a path that no longer exists:
+			#   sed: can't read .../openSUSE:repo-non-oss-debug.repo: No such file or directory
 			sudo sed -i -e '/^[[:space:]]*service[[:space:]]*=/d' "$r"
+			b=$(basename "$r")
+			case "$b" in *:*) sudo mv "$r" "${WORKDIR}/${rootfs_dir}${rdir}/${b#*:}" ;; esac
 			done
 		done
 		sudo rm -f "${WORKDIR:?}/${rootfs_dir}/var/lib/zypp/RepoManager.db"
