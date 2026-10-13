@@ -78,6 +78,17 @@ bootstrap_distribution() {
 
 		sudo rm -rf "${WORKDIR:?}/${rootfs_dir}/var/cache/pacman/pkg"/* 2>/dev/null || true
 
+		# The chroot above runs pacman-key --init and --populate artix, which take
+		# /var/lib/pacman/db.lck. It is released on a clean exit, and a build that is
+		# interrupted or that fails on a later step leaves it behind. An image that
+		# ships the lock cannot sync anything, and says only:
+		#
+		#   error: failed to synchronize all databases (unable to lock database)
+		#
+		# which names nothing a user can act on. pacman has no way to recover from it
+		# either, so the image must not carry it.
+		sudo rm -f "${WORKDIR:?}/${rootfs_dir}/var/lib/pacman/db.lck" 2>/dev/null || true
+
 		# pacman.conf, for the same three reasons Arch needs them, and all three are
 		# device problems rather than build problems.
 		#
