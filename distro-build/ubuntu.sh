@@ -261,11 +261,43 @@ bootstrap_distribution() {
 			"${SCRIPT_DIR}/bake-first-start.sh" "${WORKDIR}/${rootfs_dir}" \
 				"apt-get update && apt-get -y upgrade"
 
-			# Trim last, so the update's own downloads are removed and the size
-			# reported is the size that ships.
-			"${SCRIPT_DIR}/trim-rootfs.sh" "${WORKDIR}/${rootfs_dir}"
+# Trim last, so the update's own downloads are removed and the size
+		# reported is the size that ships.
+		"${SCRIPT_DIR}/trim-rootfs.sh" "${WORKDIR}/${rootfs_dir}"
 
-			# Debian and Ubuntu share a recipe, so the meta records which one this is.
+		# Two things the shared trim cannot remove, because on Debian they are
+		# either absent or harmless and this recipe exists only for Ubuntu.
+		#
+		# Done here rather than in trim-rootfs.sh so that changing it cannot alter
+		# Debian, Kali, Pardus, Parrot or Trisquel, whose images are already right.
+		#
+		# apt's binary indexes. The trim clears /var/cache/apt/archives/* and
+		# /var/lib/apt/lists/*, but these two sit directly in /var/cache/apt/ and so
+		# survived: 52.34 MB each, 104.7 MB in total, in an image whose whole point
+		# is being small. apt rebuilds both on its next run, so nothing is lost.
+		sudo rm -f \
+			"${WORKDIR:?}/${rootfs_dir}/var/cache/apt/pkgcache.bin" \
+			"${WORKDIR:?}/${rootfs_dir}/var/cache/apt/srcpkgcache.bin" \
+			2>/dev/null || true
+
+		# The Rust coreutils installs its message catalogues under its own
+		# directory rather than /usr/share/locale, which is the only one the
+		# trim's strip loop knows about. Ubuntu resolute ships 2792 files here.
+		#
+		# RedTerm runs sessions as LANG=C.UTF-8, and C.UTF-8 on Debian-family lives
+		# in /usr/lib/locale/C.utf8, which is not touched here. These catalogues are
+		# for translated diagnostics, which a terminal session has no use for.
+		#
+		# The 1167 MB of the binaries in /usr/lib/cargo/bin is NOT removed, and must
+		# never be: 108 of them are what /usr/bin/cat, /usr/bin/chmod and the rest
+		# resolve to, because /bin is a symlink to /usr/bin. Removing them leaves a
+		# small image with no working coreutils at all.
+		if sudo test -d "${WORKDIR}/${rootfs_dir}/usr/share/coreutils/locales"; then
+			sudo rm -rf "${WORKDIR:?}/${rootfs_dir}/usr/share/coreutils/locales"/* \
+				2>/dev/null || true
+		fi
+
+		# Debian and Ubuntu share a recipe, so the meta records which one this is.
 			case "$suite" in
 				trixie)  local meta_distro=debian; local meta_upstream="13";;
 				resolute) local meta_distro=ubuntu; local meta_upstream="26.04";;
