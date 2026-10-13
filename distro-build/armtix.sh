@@ -78,6 +78,38 @@ bootstrap_distribution() {
 
 		sudo rm -rf "${WORKDIR:?}/${rootfs_dir}/var/cache/pacman/pkg"/* 2>/dev/null || true
 
+		# pacman.conf, for the same three reasons Arch needs them, and all three are
+		# device problems rather than build problems.
+		#
+		# DisableSandbox and DownloadUser: Android has never implemented Landlock, so
+		# pacman refuses to sync at all, and proot has no working setuid, so dropping
+		# to the alpm user fails too. ARMtix ships DownloadUser = alpm, which is the
+		# second of those failures outright. Signature checking is untouched.
+		sudo sed -i '/^\[options\]/a DisableSandbox' "${WORKDIR}/${rootfs_dir}/etc/pacman.conf"
+		sudo sed -i -E 's/^[[:space:]]*#?[[:space:]]*DownloadUser[[:space:]]*=.*/DownloadUser = root/' \
+			"${WORKDIR}/${rootfs_dir}/etc/pacman.conf"
+
+		# pacman's own downloader, replaced with curl. No -C -: it makes curl send
+		# Range requests on retry, the mirror answers those with 404, and combined
+		# with -f that is exit 22 -- pacman reporting a failed download for a file
+		# that had arrived.
+		sudo sed -i '/^[[:space:]]*XferCommand/d; /^[[:space:]]*#[[:space:]]*XferCommand/d' \
+			"${WORKDIR}/${rootfs_dir}/etc/pacman.conf"
+		sudo sed -i '/^\[options\]/a XferCommand = /usr/bin/curl -fL --progress-bar --retry 3 --retry-delay 2 --connect-timeout 15 -o %o %u' \
+			"${WORKDIR}/${rootfs_dir}/etc/pacman.conf"
+
+		# Do not run ALPM hooks. Installing wget on a device printed
+		#   (1/1) Creating system user accounts...
+		#   Failed to chase and open directory '/etc/sysusers.d', ignoring:
+		#     Protocol driver not attached
+		#   Failed to load user database: Protocol driver not attached
+		#   error: command failed to execute correctly
+		# and every transaction ends that way. No systemd runs in these sessions, so
+		# no hook has anything to do.
+		sudo sed -i '/^[[:space:]]*#*[[:space:]]*HookDir[[:space:]]*=/d' \
+			"${WORKDIR}/${rootfs_dir}/etc/pacman.conf"
+		sudo sed -i '/^\[options\]/a HookDir = /dev/null' "${WORKDIR}/${rootfs_dir}/etc/pacman.conf"
+
 		"${SCRIPT_DIR}/verify-rootfs.sh" "${WORKDIR}/${rootfs_dir}" "ARMtix"
 		"${SCRIPT_DIR}/bake-first-start.sh" "${WORKDIR}/${rootfs_dir}" "true"
 		"${SCRIPT_DIR}/trim-rootfs.sh" "${WORKDIR}/${rootfs_dir}"

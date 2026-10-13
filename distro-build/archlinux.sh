@@ -147,6 +147,42 @@ bootstrap_distribution() {
 		sudo sed -i -E 's/^[[:space:]]*#?[[:space:]]*DownloadUser[[:space:]]*=.*/DownloadUser = root/' \
 			"${WORKDIR}/${rootfs_dir}/etc/pacman.conf"
 
+		# pacman's own downloader, replaced with curl.
+		#
+		# A retried transfer that gets a Range request answered with 404, combined
+		# with -f, is exit 22 -- pacman then reports "failed to download" for a file
+		# that had in fact arrived. So -C - is deliberately absent. --speed-limit and
+		# --speed-time are absent too: they abort a transfer that merely slows down
+		# instead of failing over, which on a mobile link killed downloads that were
+		# still progressing.
+		sudo sed -i '/^[[:space:]]*XferCommand/d; /^[[:space:]]*#[[:space:]]*XferCommand/d' \
+			"${WORKDIR}/${rootfs_dir}/etc/pacman.conf"
+		sudo sed -i '/^\[options\]/a XferCommand = /usr/bin/curl -fL --progress-bar --retry 3 --retry-delay 2 --connect-timeout 15 -o %o %u' \
+			"${WORKDIR}/${rootfs_dir}/etc/pacman.conf"
+
+		# Do not run ALPM hooks.
+		#
+		# Every pacman transaction on a device ran eleven systemd hooks, and none of
+		# them can work under proot:
+		#
+		#   Failed to chase and open directory '/etc/sysusers.d', ignoring:
+		#     Protocol driver not attached
+		#   Failed to load user database: Protocol driver not attached
+		#   ( 1/14) Creating system user accounts...
+		#   error: command failed to execute correctly
+		#
+		# systemd-sysusers, tmpfiles, hwdb, catalog, sysctl, binfmt, the
+		# daemon-reload and enqueue-marked pair, and udev-reload all fail the same
+		# way, because there is no system manager and no udev to talk to. The
+		# transaction itself succeeds; the hooks report an error on every install.
+		#
+		# No systemd ever runs in these sessions, so there is nothing for any of them
+		# to do. What is given up is update-ca-trust and depmod: the trust store is
+		# already populated by the build, and a session cannot load kernel modules.
+		sudo sed -i '/^[[:space:]]*#*[[:space:]]*HookDir[[:space:]]*=/d' \
+			"${WORKDIR}/${rootfs_dir}/etc/pacman.conf"
+		sudo sed -i '/^\[options\]/a HookDir = /dev/null' "${WORKDIR}/${rootfs_dir}/etc/pacman.conf"
+
 		image_meta "$tarball" "arch" "$arch" "20260517" \
 			"\"displayName\": \"Arch Linux\"" \
 			"\"packageManager\": \"pacman\"" \
