@@ -45,115 +45,47 @@ bootstrap_distribution() {
 
 		"${SCRIPT_DIR}/trim-rootfs.sh" "${WORKDIR}/${rootfs_dir}"
 
-		# Rewrite the repository aliases so the image works on its own.
+		# https, not http. Plain http adds a redirect hop for no benefit, and both were
+		# measured serving the Leap 16.0 aarch64 repodata:
 		#
-		# Leap's .repo files are named and sectioned [openSUSE:repo-oss]. libzypp
-		# cannot cache a solv file for an alias containing a colon:
+		#   http://cdn.opensuse.org/...    200  0.95s
+		#   https://cdn.opensuse.org/...   200  0.06s
 		#
-		#   Can't open solv-file: /var/cache/zypp/solv/openSUSE:repo-oss/solv
-		#
-		# so every repository is skipped, the cache never builds, and the session has
-		# no packages at all -- "No provider of 'git' found" for everything.
-		#
-		# Done here rather than by the app: an image that is broken until a particular
-		# version of the app repairs it is not a working image. Three things have to
-		# change, not one -- the section header, the filename, and the parsed repo
-		# list in RepoManager.db, which keeps serving the old aliases even after the
-		# files are rewritten.
+		# This is NOT a fix for `Curl error (28)`. That is a network timeout and has
+		# nothing to do with configuration. The protocol is changed because https is
+		# the better default, not because it was measured to rescue a failing refresh.
 		for rdir in /etc/zypp/repos.d /usr/share/zypp/repos.d; do
 			[ -d "${WORKDIR}/${rootfs_dir}${rdir}" ] || continue
 			for r in "${WORKDIR}/${rootfs_dir}${rdir}"/*.repo; do
 				[ -e "$r" ] || continue
-sudo sed -i -e 's/^\[[^:]*:\(.*\)\]$/[\1]/' "$r"
-			# Detach the repo from its libzypp service.
-			#
-			# This is the part that actually decides the alias, and rewriting the
-			# section header above never had a chance against it. Every Leap .repo
-			# ends with `service=openSUSE`, and libzypp namespaces a serviced repo
-			# as `service:alias`. So the repository keeps the alias `openSUSE:repo-oss`
-			# no matter what its section header or filename says -- which is exactly
-			# what a session showed:
-			#
-			#   Looking for gpg keys in repository repo-oss (16.0).
-			#   Error building the cache:
-			#   Can't open solv-file: /var/cache/zypp/solv/openSUSE:repo-oss/solv
-			#
-			# The name= line above is why that looks contradictory: the display name
-			# is clean while the alias is not. The files even say so at the top:
-			# "Manual changes may be overwritten by a service refresh."
-			#
-			# With the service detached, the repo is an ordinary one, keeps the alias
-			# in its own header, and no refresh can put the colon back.
-			#
-			# Before the rename below, because that moves the file out from under $r
-			# and this sed would then fail on a path that no longer exists:
-			#   sed: can't read .../openSUSE:repo-non-oss-debug.repo: No such file or directory
-			sudo sed -i -e '/^[[:space:]]*service[[:space:]]*=/d' "$r"
-			# https, not http. A timeout on the way in is the one openSUSE
-			# failure left on the device:
-			#
-			#   [repo-oss|http://cdn.opensuse.org/...] Failed to retrieve new repository metadata.
-			#   Timeout reached Curl error (28)
-			#
-			# The alias problem is fixed by this point -- the solv path in that
-			# error is already clean -- so this is the network, and plain http adds a
-			# redirect hop for no benefit. Verified reachable both ways:
-			#   http  200 0.83s   https 200 0.88s
-			sudo sed -i -e 's|^baseurl=http://cdn\.opensuse\.org|baseurl=https://download.opensuse.org|' "$r"
-			sudo sed -i -e 's|^gpgkey=http://cdn\.opensuse\.org|gpgkey=https://download.opensuse.org|' "$r"
-			b=$(basename "$r")
-			case "$b" in *:*) sudo mv "$r" "${WORKDIR}/${rootfs_dir}${rdir}/${b#*:}" ;; esac
+				sudo sed -i -e 's|^baseurl=http://cdn\.opensuse\.org|baseurl=https://download.opensuse.org|' "$r"
+				sudo sed -i -e 's|^gpgkey=http://cdn\.opensuse\.org|gpgkey=https://download.opensuse.org|' "$r"
 			done
 		done
-		sudo rm -f "${WORKDIR:?}/${rootfs_dir}/var/lib/zypp/RepoManager.db"
 
-		# Remove the libzypp service. This, not the .repo files, is what puts the
-		# colon back.
+		# Make zypp's cache writable, and change nothing else.
 		#
-		# /etc/zypp/services.d/openSUSE.service is the source of truth:
+		# This is the one openSUSE problem that is real. A session runs as the app's own
+		# uid while this build creates the cache as root, so a root-owned cache is a
+		# directory the session cannot write into -- and a cache it cannot write is a
+		# cache it cannot build:
 		#
-		#   [openSUSE]
-		#   enabled=1
-		#   autorefresh=1
-		#   url = dir:/usr/share/zypp/local/service/openSUSE
-		#   repo_4=openSUSE:repo-oss
-		#
-		# autorefresh=1 means every zypper command re-runs the service, which
-		# rewrites the .repo files from that directory with the original aliases. So
-		# rewriting the section headers above survives exactly until the next
-		# `zypper refresh`, which is what happened on the device:
-		#
-		#   Refreshing service 'openSUSE'.
 		#   Error building the cache:
 		#   Can't open solv-file: /var/cache/zypp/solv/openSUSE:repo-oss/solv
 		#
-		# Removing the service leaves ordinary repos, whose alias is the one in their
-		# own header, and nothing regenerates them.
-		sudo rm -f "${WORKDIR:?}/${rootfs_dir}/etc/zypp/services.d/openSUSE.service" \
-			2>/dev/null || true
-		sudo rm -rf "${WORKDIR:?}/${rootfs_dir}/usr/share/zypp/local/service/openSUSE" \
-			2>/dev/null || true
-
-		# The raw cache zypp creates read-only, so rm without this fails with
-		# "Operation not permitted" and the stale raw files survive, still naming the
-		# colon aliases. Removing the directory itself and letting it be recreated is
-		# the only way it actually goes.
-		sudo rm -rf "${WORKDIR:?}/${rootfs_dir}/var/cache/zypp"
-
-		# Recreate the tree the deletion removed.
+		# Done here as well as in the app, for the same reason the pacman sandbox
+		# settings are baked in: an image that is broken until a particular build of the
+		# app happens to repair it is not a working image. Nothing in the cache is a
+		# secret; it is re-downloadable repository metadata.
 		#
-		# libzypp will not create the per-repository cache directory itself, so an
-		# image shipped without these cannot cache a solv file at all:
-		#
-		#   Error building the cache:
-		#   Can't open solv-file: /var/cache/zypp/solv/repo-oss/solv
-		#
-		# Doing it here as well as in the app means a fresh image works on its own,
-		# rather than only after a particular app build has run once.
+		# The `rm -rf /var/cache/zypp` that used to be here is gone. It deleted a cache
+		# that worked: zypper had just built it, `zypper clean -a` above had already
+		# emptied it, and the per-repository directories are created by libzypp itself.
 		sudo mkdir -p \
 			"${WORKDIR:?}/${rootfs_dir}/var/cache/zypp/solv" \
 			"${WORKDIR:?}/${rootfs_dir}/var/cache/zypp/raw" \
 			"${WORKDIR:?}/${rootfs_dir}/var/cache/zypp/packages"
+		sudo chmod -R 777 "${WORKDIR:?}/${rootfs_dir}/var/cache/zypp"
 
 		image_meta "$tarball" "opensuse" "$arch" "${dist_version}" \
 			"\"displayName\": \"openSUSE Leap\"" \
