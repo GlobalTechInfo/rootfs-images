@@ -89,17 +89,6 @@ bootstrap_distribution() {
 		# either, so the image must not carry it.
 		sudo rm -f "${WORKDIR:?}/${rootfs_dir}/var/lib/pacman/db.lck" 2>/dev/null || true
 
-		# pacman.conf, for the same three reasons Arch needs them, and all three are
-		# device problems rather than build problems.
-		#
-		# DisableSandbox and DownloadUser: Android has never implemented Landlock, so
-		# pacman refuses to sync at all, and proot has no working setuid, so dropping
-		# to the alpm user fails too. ARMtix ships DownloadUser = alpm, which is the
-		# second of those failures outright. Signature checking is untouched.
-		sudo sed -i '/^\[options\]/a DisableSandbox' "${WORKDIR}/${rootfs_dir}/etc/pacman.conf"
-		sudo sed -i -E 's/^[[:space:]]*#?[[:space:]]*DownloadUser[[:space:]]*=.*/DownloadUser = root/' \
-			"${WORKDIR}/${rootfs_dir}/etc/pacman.conf"
-
 		# pacman's own downloader, replaced with curl. No -C -: it makes curl send
 		# Range requests on retry, the mirror answers those with 404, and combined
 		# with -f that is exit 22 -- pacman reporting a failed download for a file
@@ -227,6 +216,16 @@ bootstrap_distribution() {
 		# which is pacman dropping privileges to the alpm user -- that user exists in
 		# the image, and the switch fails because proot has no working setuid.
 		# DownloadUser = root is the other half. Signature checking is untouched.
+		#
+		# This pair used to be applied twice in this recipe, once here and once above
+		# the XferCommand block. The earlier copy appended `DisableSandbox` after
+		# [options] without first deleting an existing one, so the built image
+		# carried it twice and pacman complained about the duplicate directive on
+		# every command -- which is exactly the "two warnings on every pacman call"
+		# that the app-side script works to avoid on Manjaro. Only this copy remains,
+		# and it deletes before it inserts, so it is safe to move.
+		sudo sed -i '/^[[:space:]]*#*[[:space:]]*DisableSandbox[[:space:]]*=/d' \
+			"${WORKDIR}/${rootfs_dir}/etc/pacman.conf"
 		sudo sed -i '/^\[options\]/a DisableSandbox' "${WORKDIR}/${rootfs_dir}/etc/pacman.conf"
 		sudo sed -i -E 's/^[[:space:]]*#?[[:space:]]*DownloadUser[[:space:]]*=.*/DownloadUser = root/' \
 			"${WORKDIR}/${rootfs_dir}/etc/pacman.conf"
