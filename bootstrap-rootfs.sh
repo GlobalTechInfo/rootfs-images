@@ -170,10 +170,18 @@ archive_rootfs() {
 	#
 	# Upstream: find "${2}" -type d -perm -400 -print0 | xargs -0 sudo chmod 755
 	#
-	# `-perm -400` means "all bits of 400 are set", i.e. the owner CAN read. So it
-	# selected the directories that were already fine and chmodded them to 755,
-	# while leaving every unreadable directory at 000. Verified on a tree with
-	# 000/700/750/755 dirs: the 000 stayed 000 and 700 and 750 were widened to 755.
+	# find parses a -perm mode as OCTAL, and 0400 is bit 8: the owner's EXECUTE
+	# bit. (It is not setuid; setuid is 04000, which matches nothing.) So the
+	# predicate selects every directory the owner can already traverse, and
+	# chmods those to 755, leaving a 000 directory at 000. Measured on a tree
+	# with 000/700/750/755 dirs: the 000 stayed 000 and 700 and 750 were widened
+	# to 755. Measured again over /usr, which has 22197 directories and all
+	# 22197 of them traversable:
+	#
+	#   find /usr -type d -perm -400   ->  22197 matches
+	#   find /usr -type d -perm /0100  ->  22197 matches   (owner execute)
+	#   find /usr -type d -perm /4000  ->      0 matches   (setuid)
+	#
 	# It did not repair the problem it names, and it loosened permissions on
 	# directories that did not need touching.
 	#
