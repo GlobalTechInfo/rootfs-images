@@ -273,6 +273,22 @@ jobs:
             python3 scripts/merge-index.py .build/published/index.json images/index.json
           fi
 
+          # Now take sha256 and size from the release itself.
+          #
+          # Everything above describes the assets from outside: generate-index.sh hashes
+          # a local tarball, merge-index.py carries that number forward, and the release
+          # is uploaded separately. Three places that can disagree, and they did --
+          # 56 of 63 entries were wrong, every published asset smaller than its index
+          # claimed. That is not a cosmetic drift: the app checks every download
+          # against the index and refused every install of every affected distribution,
+          # reporting a corrupt download of a file that was perfectly good.
+          #
+          # `gh api` returns a digest for each uploaded asset, so this is not a second
+          # record to keep in step -- it is the sha256 of the bytes the release holds.
+          # The index stops asserting anything the build happened to observe, and
+          # cannot describe a release that does not exist.
+          python3 scripts/sync-index-from-release.py --index images/index.json --tag "$TAG"
+
           # Unmatched globs stay literal under bash, so a recipe that produced nothing
           # makes gh name a file that does not exist and the upload fails, rather than
           # a release quietly missing images.
