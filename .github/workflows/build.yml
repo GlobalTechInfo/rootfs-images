@@ -123,6 +123,35 @@ jobs:
           echo "Registered handlers:"
           sudo ls /proc/sys/fs/binfmt_misc/ | grep -E 'qemu-(aarch64|arm)$'
 
+      # Taken before the build, not inside the publish step.
+      #
+      # The publish step needs the published index to merge into, but it is skipped on
+      # a pull request, and the verdict step below compares before against after and so
+      # needs the "before" whatever happens. Downloading it here means it is genuinely
+      # a snapshot of the release as it stood when this run started, rather than
+      # whatever it became while the build was running.
+      - name: Snapshot the published index
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.ver.outputs.tag }}
+        run: |
+          set -uo pipefail
+          rm -rf .build/published
+          mkdir -p .build/published
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release download "$TAG" --pattern 'index.json' --dir .build/published \
+              --clobber 2>/dev/null \
+              || echo "No published index yet; this run defines it."
+          else
+            echo "No release for $TAG yet; this run defines it."
+          fi
+          if [ -s .build/published/index.json ]; then
+            echo "Release $TAG currently carries $(python3 -c '
+          import json,sys
+          d=json.load(open(sys.argv[1]))
+          print(len(d["images"] if isinstance(d,dict) else d))' .build/published/index.json) images."
+          fi
+
       - name: Build
         run: |
           set -uo pipefail
@@ -255,11 +284,68 @@ jobs:
           echo "Published $(gh release view "$TAG" --json assets --jq '.assets | length') assets to $TAG"
       - name: Report incomplete release
         # Last, and with always(), because the point is to publish what succeeded
-        # first and only then fail the run. Placed before the publish it would exit 1
-        # and skip every remaining step, which is the exact outcome the per-recipe
-        # loop exists to avoid.
-        if: always() && env.FAILED_RECIPES != ''
+        # first and only then decide the verdict. Placed before the publish it would
+        # exit 1 and skip every remaining step, which is the exact outcome the
+        # per-recipe loop exists to avoid.
+        #
+        # The verdict is whether the release LOST coverage, not whether every recipe
+        # ran. Those are different questions and only one of them is about this
+        # project.
+        #
+        # armtixlinux.org stopped answering entirely -- connection refused on 443 and
+        # 80, bare host and www, DNS resolving to 45.67.58.27 -- and that turned every
+        # run red while the release itself stayed complete and correct, because
+        # merge-index.py carries every entry the build did not produce forward from the
+        # published index. A green pipeline is supposed to mean "the catalogue is
+        # intact and the things that could be rebuilt were". A dead third-party mirror
+        # is none of those.
+        #
+        # So: a recipe that fails but leaves its previously published asset in place is
+        # a warning, and a run that drops a distribution from the index is a failure.
+        # The second is the one that matters -- recreate-the-release did exactly that
+        # once and deleted twenty distributions while reporting success -- so it is
+        # what this step is actually guarding.
+        # Not on a pull request: nothing is published there, so nothing can be lost,
+        # and the merge that restores coverage happens in the publish step, which a
+        # pull request skips. Comparing a pull request's local index against the
+        # published one would report every distribution it did not rebuild as lost.
+        if: always() && env.FAILED_RECIPES != '' && github.event_name != 'pull_request'
         run: |
-          echo "::error::Incomplete release. These recipes failed: ${FAILED_RECIPES}"
-          echo "The release contains only the recipes that succeeded."
-          exit 1
+          set -uo pipefail
+          echo "::warning::These recipes failed to build: ${FAILED_RECIPES}"
+
+          # The index as it was before this run started, and the one now published.
+          before=.build/published/index.json
+          after=images/index.json
+
+          if [ ! -s "$before" ] || [ ! -s "$after" ]; then
+            echo "::error::No index to compare against; treating the release as incomplete."
+            exit 1
+          fi
+
+          python3 - <<'PY'
+          import json, sys
+
+          def entries(path):
+              with open(path) as fh:
+                  data = json.load(fh)
+              images = data["images"] if isinstance(data, dict) else data
+              return {(i["distro"], i["arch"]) for i in images}
+
+          before = entries(".build/published/index.json")
+          after = entries("images/index.json")
+
+          lost = sorted(before - after)
+          if lost:
+              print("::error::This run dropped %d distribution(s) from the release:" % len(lost))
+              for distro, arch in lost:
+                  print("::error::  lost %s/%s" % (distro, arch))
+              sys.exit(1)
+
+          print("::warning::No distribution was lost: %d entries before, %d after."
+                % (len(before), len(after)))
+          sys.exit(0)
+          PY
+
+          echo "The release kept every distribution it had. See the warnings above for"
+          echo "which recipes could not be rebuilt, and why."
