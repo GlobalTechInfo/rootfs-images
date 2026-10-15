@@ -149,7 +149,26 @@ sudo find "${ROOTFS_DIR:?}/boot" -mindepth 1 -delete 2>/dev/null || true
 sudo rm -rf "${ROOTFS_DIR:?}"/var/cache/apt/archives/* 2>/dev/null || true
 sudo rm -rf "${ROOTFS_DIR:?}"/var/lib/apt/lists/* 2>/dev/null || true
 sudo rm -rf "${ROOTFS_DIR:?}"/var/cache/dnf/* 2>/dev/null || true
-sudo rm -rf "${ROOTFS_DIR:?}"/var/cache/zypp/* 2>/dev/null || true
+# /var/cache/zypp is NOT trimmed.
+#
+# It was, and that is the whole reason openSUSE could not install a package. The build
+# runs `zypper refresh` natively, as root, in a chroot, and that works: the log ends
+# with "Building repository 'repo-oss (16.0)' cache [....done]". Then this line removed
+# the result. The trim step reported "freed 81 MB", which is about exactly the two
+# 43 MB solv indexes, so the image shipped with the cache deliberately deleted from it.
+#
+# Keeping it is also cheaper than the alternative. A session that builds the cache has
+# to do it in a proot session, where libzypp decides whether the build worked from the
+# child's exit status -- and two of its own threads race to reap that child, so a
+# repo2solv that fails is reported as having succeeded. There is no way to recover
+# from that at runtime, and no way for the user to see what happened either.
+#
+# The raw metadata half (~35 MB) is kept too, because it is what the solv index is
+# verified against: without it a session would download metadata again and then find
+# the shipped index out of date, which is exactly the rebuild this avoids.
+sudo rm -rf "${ROOTFS_DIR:?}"/var/cache/zypp/tmp/* 2>/dev/null || true
+sudo find "${ROOTFS_DIR:?}/var/cache/zypp" -mindepth 1 -maxdepth 1 -type d \
+	! -name solv ! -name raw ! -name tmp -exec rm -rf {} + 2>/dev/null || true
 sudo rm -rf "${ROOTFS_DIR:?}"/var/cache/xbps/* 2>/dev/null || true
 sudo rm -rf "${ROOTFS_DIR:?}"/var/cache/pacman/pkg/* 2>/dev/null || true
 

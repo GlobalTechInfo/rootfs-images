@@ -37,45 +37,6 @@ bootstrap_distribution() {
 			rm -f "${WORKDIR}/${rootfs_dir}"/var/log/zypper.log
 			rm -f "${WORKDIR}/${rootfs_dir}"/var/log/zypp-history
 
-			# Ship a working package cache.
-			#
-			# `zypper clean -a --all` used to run here, and it is the reason a session on
-			# this image spent minutes downloading metadata at first start. More to the
-			# point, it shipped an image that could not install a package until it had
-			# been repaired from inside a proot session, where the repair is unreliable:
-			# zypper decides whether this cache build worked from the child's exit status,
-			# and two of libzypp's own threads race to reap that child. The loser gets -1,
-			# the spawn engine then returns without assigning _exitStatus -- which
-			# start() initialised to 0 -- so a repo2solv that failed is reported as having
-			# succeeded, and the only visible symptom is the downstream
-			#     Can't open solv-file: /var/cache/zypp/solv/openSUSE:repo-oss/solv
-			# which names a missing directory rather than the failure that caused it.
-			#
-			# Built here instead, as root in a chroot, no proot: the download and the
-			# index build are both ordinary operations, and each file is checked rather
-			# than assumed. Roughly 43 MB of index for repo-oss and 6 KB for
-			# repo-openh264, which xz compresses well; a session that downloads that
-			# every start is strictly worse.
-			#
-			# The cookie goes with it. Without one libzypp treats the cache as absent,
-			# rebuilds it on first use, and the bug above is back.
-			_fail=0
-			for _d in "${WORKDIR}/${rootfs_dir}"/var/cache/zypp/raw/*/repodata; do
-				[ -d "$_d" ] || continue
-				[ -s "$_d/repomd.xml" ] || continue
-				# The primary index is named <sha256>-primary.xml.<ext>, not primary.xml.*,
-				# so a glob that does not account for the checksum prefix matches nothing
-				# and silently skips every repository.
-				ls "$_d"/*-primary.xml.* >/dev/null 2>&1 || continue
-				_a=$(basename "$(dirname "$_d")")
-				_o="${WORKDIR}/${rootfs_dir}/var/cache/zypp/solv/$_a/solv"
-				mkdir -p "$(dirname "$_o")"
-				chroot "${WORKDIR}/${rootfs_dir}" repo2solv -o "$_o" -X "$_d" \
-					|| { echo "[!] repo2solv failed for $_a" >&2; _fail=1; continue; }
-				[ -s "$_o" ] || { echo "[!] no index produced for $_a" >&2; _fail=1; continue; }
-				echo "[+] shipped package index for $_a ($(du -h "$_o" | cut -f1))"
-			done
-			[ "$_fail" = 0 ] || { echo "[!] openSUSE package index is incomplete" >&2; exit 1; }
 		EOF
 
 		"${SCRIPT_DIR}/verify-rootfs.sh" "${WORKDIR}/${rootfs_dir}" "openSUSE"
