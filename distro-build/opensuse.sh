@@ -63,28 +63,49 @@ bootstrap_distribution() {
 			done
 		done
 
-		# Make zypp's cache writable, and change nothing else.
+		# Make zypp's cache writable, AND create the per-repository directories.
 		#
-		# This is the one openSUSE problem that is real. A session runs as the app's own
-		# uid while this build creates the cache as root, so a root-owned cache is a
-		# directory the session cannot write into -- and a cache it cannot write is a
-		# cache it cannot build:
+		# The writability is the one problem that is real: a session runs as the app's
+		# own uid while this build creates the cache as root, so a root-owned cache is a
+		# directory the session cannot write into.
+		#
+		# The directory creation is here because libzypp creating it itself was believed
+		# to work, and on a device it does not:
 		#
 		#   Error building the cache:
 		#   Can't open solv-file: /var/cache/zypp/solv/openSUSE:repo-oss/solv
+		#   Skipping repository 'repo-oss (16.0)' because of the above error.
+		#
+		# Run natively as root, `zypper refresh` against this very image succeeds and
+		# builds that path without being asked to. As root it can always create a
+		# directory; as the app's uid under proot it cannot, and the failure is silent
+		# about the reason. So the directories are made here, where they can be created
+		# as root, and left writable.
+		#
+		# The alias is the .repo file's section header, which is where the error names
+		# it -- `[openSUSE:repo-oss]` becomes
+		# `/var/cache/zypp/solv/openSUSE:repo-oss`. Rewriting the headers was tried and
+		# removed; what is needed is for the path to exist, not for the name to change.
 		#
 		# Done here as well as in the app, for the same reason the pacman sandbox
 		# settings are baked in: an image that is broken until a particular build of the
 		# app happens to repair it is not a working image. Nothing in the cache is a
 		# secret; it is re-downloadable repository metadata.
-		#
-		# The `rm -rf /var/cache/zypp` that used to be here is gone. It deleted a cache
-		# that worked: zypper had just built it, `zypper clean -a` above had already
-		# emptied it, and the per-repository directories are created by libzypp itself.
 		sudo mkdir -p \
 			"${WORKDIR:?}/${rootfs_dir}/var/cache/zypp/solv" \
 			"${WORKDIR:?}/${rootfs_dir}/var/cache/zypp/raw" \
 			"${WORKDIR:?}/${rootfs_dir}/var/cache/zypp/packages"
+		for rdir in /etc/zypp/repos.d /usr/share/zypp/repos.d; do
+			[ -d "${WORKDIR}/${rootfs_dir}${rdir}" ] || continue
+			for r in "${WORKDIR}/${rootfs_dir}${rdir}"/*.repo; do
+				[ -e "$r" ] || continue
+				alias=$(sed -n 's/^\[\([^]]*\)\]$/\1/p' "$r" | head -1)
+				[ -n "$alias" ] || continue
+				sudo mkdir -p \
+					"${WORKDIR:?}/${rootfs_dir}/var/cache/zypp/solv/${alias}" \
+					"${WORKDIR:?}/${rootfs_dir}/var/cache/zypp/raw/${alias}"
+			done
+		done
 		sudo chmod -R 777 "${WORKDIR:?}/${rootfs_dir}/var/cache/zypp"
 
 		image_meta "$tarball" "opensuse" "$arch" "${dist_version}" \

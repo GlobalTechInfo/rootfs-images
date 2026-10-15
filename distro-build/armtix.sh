@@ -140,10 +140,41 @@ bootstrap_distribution() {
 		# are not ours to begin with, so pacman neither writes them nor complains that
 		# they are missing.
 		sudo mkdir -p "${WORKDIR}/${rootfs_dir}/etc/pacman.d"
+		# Every hook, not a selection of them.
+		#
+		# The previous list named the systemd and sysusers hooks individually and left
+		# the rest. On the device the transaction still printed, in full:
+		#
+		#   Creating system user accounts...
+		#   Failed to chase and open directory '/etc/sysusers.d', ignoring:
+		#     Protocol driver not attached
+		#   error: command failed to execute correctly
+		#   Updating linux initcpios...
+		#   ==> ERROR: Cannot acquire used modules. Unable to use autodetection.
+		#
+		# which is 20-esysusers and 90-mkinitcpio-install. The second was never on the
+		# list at all, and mkinitcpio is the loud one: it walks /sys/devices, which a
+		# proot guest cannot read, so it retries and fails on every single transaction.
+		#
+		# A wildcard cannot go stale when a package adds a new hook, which is the
+		# failure mode of enumerating them.
 		sudo sed -i '/^[[:space:]]*#*[[:space:]]*NoExtract[[:space:]]*=/d' \
 			"${WORKDIR}/${rootfs_dir}/etc/pacman.conf"
-		sudo sed -i '/^\[options\]/a NoExtract = usr/share/man/* usr/share/doc/* usr/share/info/* usr/share/locale/* usr/share/libalpm/hooks/*systemd*.hook usr/share/libalpm/hooks/20-esysusers.hook usr/share/libalpm/hooks/21-etmpfiles.hook usr/share/libalpm/hooks/25-udev-hwdb.hook usr/share/libalpm/hooks/30-binfmt.hook usr/share/libalpm/hooks/30-sysctl.hook usr/share/libalpm/hooks/35-udev-reload.hook' \
+		sudo sed -i '/^\[options\]/a NoExtract = usr/share/man/* usr/share/doc/* usr/share/info/* usr/share/locale/* usr/share/libalpm/hooks/*' \
 			"${WORKDIR}/${rootfs_dir}/etc/pacman.conf"
+
+		# Remove them from the image as well.
+		#
+		# HookDir is supposed to be enough on its own, and a probe hook placed in the
+		# backend directory did not run when the image was built. On a device they run
+		# anyway, so the configuration alone is not carrying this. Deleting the files
+		# makes it true regardless of what pacman does with HookDir, and NoExtract is
+		# what stops the deletion from turning into a complaint: without it every
+		# package that owns a hook re-checks a file that is no longer there and prints
+		#   warning: could not get file information for usr/share/libalpm/hooks/...
+		# which is what a previous app-side attempt produced, and which is why this is
+		# done here at build time with NoExtract set first, rather than at session start.
+		sudo rm -rf "${WORKDIR:?}/${rootfs_dir}/usr/share/libalpm/hooks"/* 2>/dev/null || true
 
 		"${SCRIPT_DIR}/verify-rootfs.sh" "${WORKDIR}/${rootfs_dir}" "ARMtix"
 		"${SCRIPT_DIR}/bake-first-start.sh" "${WORKDIR}/${rootfs_dir}" "true"
