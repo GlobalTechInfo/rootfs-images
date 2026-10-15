@@ -204,9 +204,18 @@ jobs:
             echo "FAILED_RECIPES=${failed}" >> "$GITHUB_ENV"
           fi
 
+          # Not an exit. Producing no new tarball is a statement about this build, not
+          # about the release: merge-index.py carries forward everything the release
+          # already had, and the verdict step below is what decides whether anything
+          # was actually lost.
+          #
+          # This used to exit 1, which meant a run that selected only a recipe whose
+          # upstream was down failed here -- before the verdict step ever ran, so the
+          # check that could have made the right call never got to make it. The verdict
+          # still fails the run when there is genuinely nothing to publish: it needs
+          # both indexes, and exits 1 if either is missing.
           if [ -z "$(ls -1 rootfs/*.tar.xz 2>/dev/null)" ]; then
-            echo "::error::No images were produced by any recipe."
-            exit 1
+            echo "::warning::This build produced no new images; the release keeps what it had."
           fi
 
       - name: Generate index
