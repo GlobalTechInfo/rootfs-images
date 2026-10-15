@@ -33,9 +33,33 @@ bootstrap_distribution() {
 		# neither.
 		init="openrc"
 
-		curl --fail --location \
-			--output "${WORKDIR}/armtix-${init}-${dist_version}.tar.xz" \
-			"https://armtixlinux.org/images/armtix-runit-${dist_version}.tar.xz"
+		# Reuse the tarball when it is already here.
+		#
+		# ARMtix publishes exactly one file per release, 1.1 GB, from a single host with
+		# no mirror. That host went down entirely -- connection refused on 443 and 80,
+		# bare host and www, DNS still resolving -- and the download is the whole build.
+		# Re-fetching it for every rebuild means an unrelated recipe change, or a retry
+		# after any failure, needs that host to be up even though nothing about the
+		# tarball changed.
+		#
+		# Size is checked as well as presence: a half-written file from an interrupted
+		# download is still a file, and reusing one would produce an image missing
+		# whatever was not fetched. The size is not pinned in the recipe, because the
+		# release is dated and this is the same file that produced the last image.
+		arball="${WORKDIR}/armtix-${init}-${dist_version}.tar.xz"
+		if [ ! -s "$arball" ]; then
+			curl --fail --location \
+				--output "$arball" \
+				"https://armtixlinux.org/images/armtix-runit-${dist_version}.tar.xz"
+		elif ! tar -tJf "$arball" >/dev/null 2>&1; then
+			echo "  armtix: cached tarball is truncated or unreadable, fetching it again" >&2
+			rm -f "$arball"
+			curl --fail --location \
+				--output "$arball" \
+				"https://armtixlinux.org/images/armtix-runit-${dist_version}.tar.xz"
+		else
+			echo "  armtix: reusing the cached $(basename "$arball")"
+		fi
 
 		sudo rm -rf "${WORKDIR:?}/${rootfs_dir}"
 		sudo mkdir -m 755 "${WORKDIR}/${rootfs_dir}"
