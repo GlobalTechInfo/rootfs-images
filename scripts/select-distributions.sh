@@ -63,6 +63,46 @@ elif grep -qx 'bootstrap-rootfs.sh' .build/changed.txt; then
 	# so a change to it invalidates all of them.
 	echo "bootstrap-rootfs.sh changed; rebuilding all recipes." >&2
 	all_recipes > .build/list.txt
+elif grep -q '^scripts/' .build/changed.txt; then
+	# A helper script only affects the recipes that call it.
+	#
+	# Every script under scripts/ used to land in the "we cannot account for this"
+	# branch below, so fixing a helper -- adding mirror pruning, correcting a trim --
+	# rebuilt all twenty distributions. The change was aimed at one recipe and paid for
+	# twenty builds, each overwriting a published asset that had been verified on a real
+	# device. That is the same shape as the index.json trap, one directory over.
+	#
+	# The mapping is not a guess: each recipe names the helpers it runs, so a changed
+	# script selects exactly the recipes whose source mentions its name. A script no
+	# recipe calls -- a selftest, or this file itself -- selects nothing, which is
+	# correct, because running it changes no byte of any image.
+	#
+	# A *removed* script cannot be grepped for in the new tree, so its recipes are found
+	# from the base commit instead. That is the case where getting it wrong would leave
+	# an image built by a recipe whose helper no longer exists.
+	: > .build/list.txt
+	while read -r f; do
+		[ -n "$f" ] || continue
+		name=$(basename "$f")
+		if [ -e "$f" ]; then
+			hits=$(grep -l -- "$name" distro-build/*.sh 2>/dev/null || true)
+		else
+			hits=$(git grep -l -- "$name" "${BASE:-HEAD}" -- 'distro-build/*.sh' 2>/dev/null \
+				| sed 's@^[^:]*:@@' || true)
+		fi
+		if [ -z "$hits" ]; then
+			echo "${name}: called by no recipe, so no image is affected." >&2
+			continue
+		fi
+		for h in $hits; do
+			echo "${name}: rebuilds $(basename "$h" .sh)" >&2
+			basename "$h" .sh >> .build/list.txt
+		done
+	done < <(grep '^scripts/' .build/changed.txt || true)
+	sort -u -o .build/list.txt .build/list.txt
+	if [ ! -s .build/list.txt ]; then
+		echo "Only helpers that no recipe calls changed; nothing to rebuild." >&2
+	fi
 else
 	sed -n 's@^distro-build/\(.*\)\.sh$@\1@p' .build/changed.txt | sort -u > .build/list.txt
 	if [ ! -s .build/list.txt ]; then
