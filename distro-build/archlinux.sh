@@ -101,6 +101,11 @@ bootstrap_distribution() {
 		sudo rm -rf "${WORKDIR:?}/${rootfs_dir}/var/cache/pacman/pkg"/* 2>/dev/null || true
 
 		"${SCRIPT_DIR}/verify-rootfs.sh" "${WORKDIR}/${rootfs_dir}" "Arch Linux"
+
+		# Before the bake, so it syncs against a database path of its own rather than
+		# anything the bake left behind.
+		"${SCRIPT_DIR}/prune-dead-mirrors.sh" "${WORKDIR}/${rootfs_dir}"
+
 		"${SCRIPT_DIR}/bake-first-start.sh" "${WORKDIR}/${rootfs_dir}" "true"
 		"${SCRIPT_DIR}/trim-rootfs.sh" "${WORKDIR}/${rootfs_dir}"
 
