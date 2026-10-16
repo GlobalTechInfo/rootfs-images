@@ -147,7 +147,7 @@ bootstrap_distribution() {
 		# DisableSandbox covers Landlock. It says nothing about the second failure,
 		# which is pacman dropping privileges to the alpm user -- that user exists in
 		# the image, and the switch fails because proot has no working setuid.
-		# DownloadUser = root is the other half. Signature checking is untouched.
+		# DownloadUser = root is the other half.
 		sudo sed -i '/^\[options\]/a DisableSandbox' "${WORKDIR}/${rootfs_dir}/etc/pacman.conf"
 		sudo sed -i -E 's/^[[:space:]]*#?[[:space:]]*DownloadUser[[:space:]]*=.*/DownloadUser = root/' \
 			"${WORKDIR}/${rootfs_dir}/etc/pacman.conf"
@@ -163,6 +163,31 @@ bootstrap_distribution() {
 		sudo sed -i '/^[[:space:]]*XferCommand/d; /^[[:space:]]*#[[:space:]]*XferCommand/d' \
 			"${WORKDIR}/${rootfs_dir}/etc/pacman.conf"
 		sudo sed -i '/^\[options\]/a XferCommand = /usr/bin/curl -fL --progress-bar --retry 3 --retry-delay 2 --connect-timeout 15 -o %o %u' \
+			"${WORKDIR}/${rootfs_dir}/etc/pacman.conf"
+
+		# Stop asking for database signatures that do not exist.
+		#
+		# The base image ships `SigLevel = Required DatabaseOptional`, so pacman requests
+		# `<repo>.db.sig` -- and no ArchLinuxARM mirror serves it. Measured across every
+		# reachable mirror:
+		#
+		#     ca.us de3 de4 dk fl.us gr hu njus tw    core.db=200   core.db.sig=404
+		#
+		# The database is fine; the signature beside it is missing. With XferCommand set
+		# to `curl -f` an absent *optional* signature is a hard error, so every pacman
+		# command on every repo printed, and printed again on every database refresh:
+		#
+		#     ################################################################### 100.0%
+		#     #=#=#   #          curl: (22) The requested URL returned error: 404
+		#
+		# `DatabaseNever` rather than dropping XferCommand, which is deliberate and
+		# documented above and has nothing wrong with it. Nothing is given up here that is
+		# verified today: there is no `.db.sig` on any mirror to verify against, so
+		# `DatabaseOptional` was already verifying nothing. Package signatures stay
+		# `Required`. If ArchLinuxARM ever ships database signatures this line is the
+		# thing to revisit, and it is a one-word change.
+		sudo sed -i '/^[[:space:]]*SigLevel[[:space:]]*=/d' "${WORKDIR}/${rootfs_dir}/etc/pacman.conf"
+		sudo sed -i '/^\[options\]/a SigLevel = Required DatabaseNever' \
 			"${WORKDIR}/${rootfs_dir}/etc/pacman.conf"
 
 		# Do not run ALPM hooks.
