@@ -86,10 +86,22 @@ jobs:
           # that into exit 1 with the full recipe list printed just above it -- which
           # reads like a recipe was rejected. The script already writes .build/list.txt
           # and echoes the list to stdout, so the tee bought nothing.
-          ./scripts/select-distributions.sh \
-            --event "${{ github.event_name }}" \
-            --base "origin/${{ github.base_ref }}" \
-            --input "${{ github.event.inputs.distributions }}"
+          # --base only on pull_request. `github.base_ref` is empty on a push, and
+          # "origin/" is not a ref: the removed-script lookup then searched a ref that
+          # does not exist, failed with stderr discarded, and every deleted helper read
+          # as "called by no recipe" -- so deleting a helper a recipe still used rebuilt
+          # nothing and the run reported success. The script now rejects an unusable ref
+          # too, but the caller should not hand it one.
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            ./scripts/select-distributions.sh \
+              --event "${{ github.event_name }}" \
+              --base "origin/${{ github.base_ref }}" \
+              --input "${{ github.event.inputs.distributions }}"
+          else
+            ./scripts/select-distributions.sh \
+              --event "${{ github.event_name }}" \
+              --input "${{ github.event.inputs.distributions }}"
+          fi
           echo "Building: $(tr '\n' ' ' < .build/list.txt)"
 
       - name: Install build dependencies

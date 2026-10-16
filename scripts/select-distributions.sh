@@ -80,6 +80,33 @@ elif grep -q '^scripts/' .build/changed.txt; then
 	# A *removed* script cannot be grepped for in the new tree, so its recipes are found
 	# from the base commit instead. That is the case where getting it wrong would leave
 	# an image built by a recipe whose helper no longer exists.
+	#
+	# Which ref the removed-script lookup searches. Not "${BASE:-HEAD}": that default
+	# only applies when BASE is unset *or empty*, and the workflow passes
+	#
+	#     --base "origin/${{ github.base_ref }}"
+	#
+	# unconditionally. On a push `github.base_ref` is empty, so BASE is the non-empty
+	# string "origin/", the default never applies, and `git grep origin/` fails. The
+	# failure was invisible -- 2>/dev/null -- and an empty result reads as
+	#
+	#     prune-dead-mirrors.sh: called by no recipe, so no image is affected.
+	#
+	# which is the opposite of the truth: archlinux.sh called it. So deleting a helper
+	# that a recipe still used selected nothing to build, the recipe stayed broken, and
+	# the run reported success. Arch could not be built at all, unnoticed, while a fix
+	# that depended on rebuilding it sat committed.
+	#
+	# An unusable ref therefore falls back to HEAD rather than silently selecting
+	# nothing, and `set -e` is not enough on its own because the caller chooses the ref.
+	grep_ref=HEAD
+	if [ -n "${BASE:-}" ] && git rev-parse --verify -q "$BASE" >/dev/null 2>&1; then
+		grep_ref=$BASE
+	fi
+	if [ "$grep_ref" = HEAD ] && [ -n "${BASE:-}" ]; then
+		echo "--base '$BASE' is not a ref in this checkout; searching HEAD instead." >&2
+	fi
+
 	: > .build/list.txt
 	while read -r f; do
 		[ -n "$f" ] || continue
@@ -87,7 +114,7 @@ elif grep -q '^scripts/' .build/changed.txt; then
 		if [ -e "$f" ]; then
 			hits=$(grep -l -- "$name" distro-build/*.sh 2>/dev/null || true)
 		else
-			hits=$(git grep -l -- "$name" "${BASE:-HEAD}" -- 'distro-build/*.sh' 2>/dev/null \
+			hits=$(git grep -l -- "$name" "$grep_ref" -- 'distro-build/*.sh' 2>/dev/null \
 				| sed 's@^[^:]*:@@' || true)
 		fi
 		if [ -z "$hits" ]; then
