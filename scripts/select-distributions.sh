@@ -142,7 +142,11 @@ else
 		# build itself cost a full build -- pure waste, each time.
 		#
 		# Only a change we genuinely cannot account for still rebuilds everything.
-		if grep -qvE '^(\.github/|\.gitignore$|LICENSE$|README)' .build/changed.txt; then
+		#
+		# images/ is the published catalogue, generated from the release assets it
+		# lists: a regenerated index records what is already out and changes no byte
+		# of any image, so it must not be a reason to rebuild all twenty.
+		if grep -qvE '^(\.github/|\.gitignore$|LICENSE$|README|images/)' .build/changed.txt; then
 			echo "Unrecognised change; rebuilding everything to be safe." >&2
 			all_recipes > .build/list.txt
 		else

@@ -14,15 +14,43 @@ dist_name="openSUSE"
 dist_version="16.0"
 distro_arches="aarch64 x86_64"
 
+# The per-architecture digest of the multi-arch tag.
+#
+# leap:16.0 is a floating pointer: when upstream re-pushes the image the tag
+# moves and two builds of the same commit pull different layers, so the two
+# resulting rootfs are not guaranteed identical. Resolving the digest once
+# and building from repo@digest is what proot-distro does; `skopeo inspect
+# --raw` gives the same manifest list without a Docker daemon, which a build
+# host does not have.
+pin_opensuse_digest() {
+	local arch="$1" platform variant
+	case "$arch" in
+		aarch64) platform="arm64"; variant="v8";;
+		x86_64)  platform="amd64"; variant="";;
+		*) echo "[!] opensuse: no digest mapping for arch ${arch}" >&2; return 1;;
+	esac
+	skopeo inspect --raw "docker://docker.io/opensuse/leap:${dist_version}" 2>/dev/null | \
+		jq -r --arg a "$platform" --arg v "$variant" '
+			.manifests[]
+			| select(.platform.architecture == $a and ((.platform.variant // "") == $v))
+			| .digest'
+}
+
 bootstrap_distribution() {
-	local arch rootfs_dir tarball
+	local arch rootfs_dir tarball digest
 
 	for arch in ${distro_arches}; do
 		rootfs_dir="opensuse-${arch}"
 		tarball="${ROOTFS_DIR}/opensuse-${arch}-rt-${CURRENT_VERSION}.tar.xz"
 
+		digest="$(pin_opensuse_digest "$arch")"
+		if [ -z "$digest" ]; then
+			echo "[!] could not resolve the digest of opensuse/leap:${dist_version} for ${arch}" >&2
+			exit 1
+		fi
+
 		OCI_ARCH="$arch" "${SCRIPT_DIR}/oci-unpack.sh" \
-			"docker.io/opensuse/leap:${dist_version}" "${WORKDIR}/${rootfs_dir}"
+			"docker.io/opensuse/leap@${digest}" "${WORKDIR}/${rootfs_dir}"
 
 		# The container image has a machine-id of all zeros and a resolv.conf we have
 		# already replaced. A container image also has no working /etc/zypp credentials
@@ -110,7 +138,7 @@ bootstrap_distribution() {
 
 		image_meta "$tarball" "opensuse" "$arch" "${dist_version}" \
 			"\"displayName\": \"openSUSE Leap\"" \
-			"\"sourceImage\": \"docker.io/opensuse/leap:${dist_version}\"" \
+			"\"sourceImage\": \"docker.io/opensuse/leap@${digest}\"" \
 			"\"packageManager\": \"zypper\"" \
 			"\"recipe\": \"distro-build/opensuse.sh\""
 
