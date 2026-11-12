@@ -140,7 +140,17 @@ bootstrap_distribution() {
 		printf 'root:x:0:0:root:/root:/bin/bash\nnobody:x:65534:65534:Nobody:/:/bin/false\n' > "${rootfs}/etc/passwd"
 		printf 'root:x:0:\nnobody:x:65534:\nnixbld:x:30000:\n' > "${rootfs}/etc/group"
 		printf 'nameserver 1.1.1.1\n' > "${rootfs}/etc/resolv.conf"
-		chmod 644 "${rootfs}/etc/profile" "${rootfs}/etc/bashrc" "${rootfs}/etc/passwd" "${rootfs}/etc/group" "${rootfs}/etc/resolv.conf"
+		# hosts is the one /etc entry the app writes to on the host:
+		# setupRootfs rewrites it at every install, and a Java File follows
+		# the link into the absolute /nix/store target that does not exist
+		# on the host, so the install dies with
+		#   etc/hosts: open failed: ENOENT (No such file or directory)
+		# while every write into a real file in the same directory succeeds.
+		# The other /etc links are fine: proot resolves absolute targets
+		# inside the guest, and nothing on the host ever follows them.
+		rm -f "${rootfs}/etc/hosts"
+		printf '127.0.0.1 localhost\n::1 localhost\n' > "${rootfs}/etc/hosts"
+		chmod 644 "${rootfs}/etc/profile" "${rootfs}/etc/bashrc" "${rootfs}/etc/passwd" "${rootfs}/etc/group" "${rootfs}/etc/resolv.conf" "${rootfs}/etc/hosts"
 
 		# NixOS materialises /etc/ssl/certs at boot, in a store directory that
 		# ships *empty*: the ca-bundle.crt is written by a service a proot tree
@@ -203,6 +213,14 @@ bootstrap_distribution() {
 			"\"recipe\": \"distro-build/nixos.sh\""
 
 		archive_rootfs "$tarball" "$rootfs_dir"
+
+		# If hosts is a link in the archive again, the install dies on the
+		# host's first write to it. The archive's own type column says so:
+		# a regular file starts with -, a link with l.
+		if ! tar -tvJf "$tarball" | grep -E "^-r.* ${rootfs_dir}/etc/hosts$" ; then
+			echo "[!] ${arch}: etc/hosts is not a regular file in the archive; the app cannot write it on the host." >&2
+			exit 1
+		fi
 		echo "[*] Built $tarball"
 	done
 	unset arch
