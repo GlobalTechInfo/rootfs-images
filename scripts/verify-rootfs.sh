@@ -32,26 +32,6 @@ if [ ! -d "$ROOTFS_DIR" ]; then
 	exit 1
 fi
 
-# Follow symlinks the way an exec would, and require the target to be an executable file.
-if [ ! -x "$ROOTFS_DIR/bin/sh" ]; then
-	echo "[!] ${LABEL} is not a usable rootfs: /bin/sh is missing or dangling." >&2
-	if [ -L "$ROOTFS_DIR/bin/sh" ]; then
-		echo "[!]   /bin/sh -> $(readlink "$ROOTFS_DIR/bin/sh")" >&2
-		echo "[!]   which does not resolve inside the image." >&2
-	fi
-	echo "[!]   Top level is: $(sudo ls "$ROOTFS_DIR" 2>/dev/null | tr '\n' ' ')" >&2
-	echo "[!]   This source is a package-manager installation, not a system. Nothing built" >&2
-	echo "[!]   from it will ever start a session." >&2
-	exit 1
-fi
-
-if [ ! -r "$ROOTFS_DIR/etc/passwd" ]; then
-	echo "[!] ${LABEL}: /etc/passwd missing; there is no user to log in as." >&2
-	exit 1
-fi
-
-echo "  verify: ${LABEL} is a usable rootfs (/bin/sh resolves, /etc/passwd present)"
-
 # A symlink is broken only if its target is missing *inside this rootfs*.
 #
 # Testing with [ -e ] is wrong, and wrong in a way that depends on the machine doing
@@ -66,6 +46,9 @@ echo "  verify: ${LABEL} is a usable rootfs (/bin/sh resolves, /etc/passwd prese
 # not by the selftest that ran on the machine that happened to have sudo.ws.
 #
 # So the target is resolved by hand, against ROOTFS_DIR.
+#
+# Defined before the /bin/sh check: that check falls back to it for trees whose
+# top level links into an absolute /nix/store that only exists inside the tree.
 link_resolves() {
 	local path="$1" target depth=0
 	# The whole chain, not one hop. Ubuntu's is two:
@@ -85,6 +68,61 @@ link_resolves() {
 	done
 	[ -e "$path" ]
 }
+
+# Walk a path component by component, re-rooting every absolute link target at
+# ROOTFS_DIR.
+#
+# link_resolves above cannot be reused for the /bin/sh fallback: it relies on the
+# kernel following each path, and on this host the very first component of
+# NixOS's /bin/sh is itself a link to an absolute /nix/store that does not exist
+# here, so nothing past it is stat-able and the walk never starts. Walking the
+# components of the *original* path by hand, and re-rooting each absolute target
+# at the tree, reaches the real file from the tree side.
+resolve_in_tree() {
+	local cur="$ROOTFS_DIR" rel="${1#"$ROOTFS_DIR"/}" comp link depth=0
+	while [ -n "$rel" ] && [ "$depth" -lt 40 ]; do
+		comp="${rel%%/*}"
+		case "$rel" in */*) rel="${rel#*/}" ;; *) rel="" ;; esac
+		if [ -L "$cur/$comp" ]; then
+			link="$(readlink "$cur/$comp" 2>/dev/null)" || return 1
+			case "$link" in
+				/*) cur="${ROOTFS_DIR}${link}" ;;
+				*)  cur="$(dirname "$cur")/${link}" ;;
+			esac
+		else
+			cur="${cur}/${comp}"
+		fi
+		depth=$(( depth + 1 ))
+	done
+	[ -e "$cur" ]
+}
+
+# Follow symlinks the way an exec would, and require the target to be an executable file.
+#
+# The host-side test is right for every source except NixOS: its top level is a
+# symlink into /nix/store, and an absolute store target only exists *inside the
+# tree*, so the host test fails for a perfectly good image. For a top-level link
+# whose host-side test fails, fall back to the tree-relative walk above. Every
+# source this script was written to reject still fails it: a store path that is
+# not in the image resolves to nothing in the tree, exactly as it does on the host.
+if [ ! -x "${ROOTFS_DIR}/bin/sh" ] && ! resolve_in_tree "${ROOTFS_DIR}/bin/sh"; then
+	echo "[!] ${LABEL} is not a usable rootfs: /bin/sh is missing or dangling." >&2
+	if [ -L "$ROOTFS_DIR/bin/sh" ]; then
+		echo "[!]   /bin/sh -> $(readlink "$ROOTFS_DIR/bin/sh")" >&2
+		echo "[!]   which does not resolve inside the image." >&2
+	fi
+	echo "[!]   Top level is: $(sudo ls "$ROOTFS_DIR" 2>/dev/null | tr '\n' ' ')" >&2
+	echo "[!]   This source is a package-manager installation, not a system. Nothing built" >&2
+	echo "[!]   from it will ever start a session." >&2
+	exit 1
+fi
+
+if [ ! -r "$ROOTFS_DIR/etc/passwd" ]; then
+	echo "[!] ${LABEL}: /etc/passwd missing; there is no user to log in as." >&2
+	exit 1
+fi
+
+echo "  verify: ${LABEL} is a usable rootfs (/bin/sh resolves, /etc/passwd present)"
 
 # A command that exists but resolves to nothing.
 #

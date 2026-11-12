@@ -110,7 +110,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             curl jq sudo tar xz-utils binfmt-support qemu-user-static \
-            skopeo debootstrap arch-test
+            skopeo debootstrap arch-test p7zip-full squashfs-tools
+          # p7zip-full and squashfs-tools are the NixOS recipe's unpacking pair:
+          # the channel ISO's nix-store.squashfs comes out of the ISO image
+          # with 7z and is unpacked with unsquashfs, which must carry zstd
+          # for the 4.0 images the channel has used since 25.05.
           # Needed by the Debian-family recipes. Installed from the archive rather
           # than apt because the version upstream pins is no longer current.
           curl -fsSL -o /tmp/mmdebstrap.deb \

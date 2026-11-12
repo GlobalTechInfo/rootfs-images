@@ -204,10 +204,33 @@ do
 	fi
 done
 if [ "$have_ca" -eq 0 ]; then
-	echo "  trim: no CA bundle in any of the three usual locations; HTTPS will fail" >&2
+	echo "  trim: no CA bundle in the usual locations; HTTPS will fail" >&2
 	exit 1
 fi
-if [ ! -x "${ROOTFS_DIR}/bin/sh" ]; then
+# NixOS's /bin is a link into /nix/store, and the store target only exists
+# inside the tree, so the host-side -x test is false for a good image. Walk
+# the path component by component, re-rooting absolute targets, exactly as
+# verify-rootfs.sh's fallback does; every other family resolves host-side
+# and the walk is never consulted.
+trim_resolve_in_tree() {
+	local cur="$ROOTFS_DIR" rel="${1#"$ROOTFS_DIR"/}" comp link depth=0
+	while [ -n "$rel" ] && [ "$depth" -lt 40 ]; do
+		comp="${rel%%/*}"
+		case "$rel" in */*) rel="${rel#*/}" ;; *) rel="" ;; esac
+		if [ -L "$cur/$comp" ]; then
+			link="$(readlink "$cur/$comp" 2>/dev/null)" || return 1
+			case "$link" in
+				/*) cur="${ROOTFS_DIR}${link}" ;;
+				*)  cur="$(dirname "$cur")/${link}" ;;
+			esac
+		else
+			cur="${cur}/${comp}"
+		fi
+		depth=$(( depth + 1 ))
+	done
+	[ -e "$cur" ]
+}
+if [ ! -x "${ROOTFS_DIR}/bin/sh" ] && ! trim_resolve_in_tree "${ROOTFS_DIR}/bin/sh"; then
 	echo "  trim: /bin/sh missing, the image will not start" >&2
 	exit 1
 fi
