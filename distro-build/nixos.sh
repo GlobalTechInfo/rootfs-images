@@ -169,6 +169,19 @@ bootstrap_distribution() {
 		# part RedTerm actually checks.
 		"${SCRIPT_DIR}/bake-first-start.sh" "${WORKDIR}/${rootfs_dir}" ":"
 
+		# bake refused to write the marker on this tree: its host-side
+		# /bin/bash test cannot resolve a link into /nix/store, so it left
+		# the marker for RedTerm to write, and every other recipe's marker
+		# would have run on a shell that exists. Write it here instead: it
+		# is the digest of this recipe's own plan, the one-shot block's
+		# elements NUL-joined. If the app's nixos plan ever changes, the
+		# stale marker costs one re-run of a no-op block, which is the
+		# marker's designed failure mode.
+		local token
+		token="$(printf ':\000\000\000\000' | sha256sum | cut -c1-16)"
+		printf '%s' "$token" > "${rootfs}/root/.init_done"
+		chmod 644 "${rootfs}/root/.init_done"
+
 		"${SCRIPT_DIR}/trim-rootfs.sh" "${WORKDIR}/${rootfs_dir}"
 
 		image_meta "$tarball" "nixos" "$arch" "$dist_version" \
