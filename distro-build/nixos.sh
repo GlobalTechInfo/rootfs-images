@@ -31,12 +31,16 @@
 # snapshot: when a rebuild is wanted, update the URL and the sha together,
 # which is also when the nixos-system selection is re-checked.
 #
-# The store already contains everything a session uses: bash, coreutils,
-# gawk, sudo, vim, less, and nix/nix-env. What it does not contain is a
-# channel closure, so nothing offline can be installed and `nix-env -i`
-# fetches nothing without the nixpkgs channel. The index records
-# packageManager "nix", and RedTerm reports "no updates" for it. That is the
-# shape of NixOS, not a gap in this build: the image is complete.
+# The minimal ISO's store is the closure of a whole bootable system, and a
+# proot session starts a shell, not a machine. The build prunes the store
+# to the dynamic closure of a curated tool set (bash, coreutils, less, vim,
+# sudo, git, curl, ssh, ...) plus the system's /etc chain: 5.2 GB down to
+# ~550 MB, without dropping anything a kept binary loads at run time.
+# What remains is enough for a working session with CA-verified HTTPS;
+# what it deliberately does not contain is a channel closure, so nothing
+# offline can be installed and `nix-env` is not in the kept set. The index
+# records packageManager "nix", and RedTerm reports "no updates" for it.
+# That is the shape of NixOS, not a gap in this build.
 
 dist_name="NixOS"
 dist_version="26.05"
@@ -77,7 +81,7 @@ pick_nixos_system() {
 }
 
 bootstrap_distribution() {
-	require_tools 7z unsquashfs
+	require_tools 7z unsquashfs python3
 	local arch url sha rootfs_dir tarball store_dir rootfs sys farm etc etcdir f cacert
 
 	for arch in ${distro_arches}; do
@@ -160,6 +164,14 @@ bootstrap_distribution() {
 		# The directories a shell expects that a NixOS / does not promise.
 		mkdir -p "${rootfs}/root" "${rootfs}/home" "${rootfs}/run" \
 			"${rootfs}/tmp" "${rootfs}/var" "${rootfs}/dev" "${rootfs}/proc" "${rootfs}/sys"
+
+		# The minimal ISO's store is the closure of a whole bootable system:
+		# kernels, module trees, initrds, and every service the configuration
+		# pulls in. A proot session starts a shell, not a machine, so prune
+		# the store to the dynamic closure of a curated tool set plus the
+		# system's /etc chain: 5.2 GB down to ~550 MB on 26.05, without
+		# touching any binary a kept tool loads at run time.
+		"${SCRIPT_DIR}/nix-store-prune.py" "${rootfs}"
 
 		"${SCRIPT_DIR}/verify-rootfs.sh" "${WORKDIR}/${rootfs_dir}" "NixOS"
 

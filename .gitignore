@@ -3,3 +3,5 @@
 /.build/
 /.work/
 *.swp
+__pycache__/
+.work-build-*.log
