@@ -140,17 +140,25 @@ bootstrap_distribution() {
 		printf 'root:x:0:0:root:/root:/bin/bash\nnobody:x:65534:65534:Nobody:/:/bin/false\n' > "${rootfs}/etc/passwd"
 		printf 'root:x:0:\nnobody:x:65534:\nnixbld:x:30000:\n' > "${rootfs}/etc/group"
 		printf 'nameserver 1.1.1.1\n' > "${rootfs}/etc/resolv.conf"
-		# hosts is the one /etc entry the app writes to on the host:
-		# setupRootfs rewrites it at every install, and a Java File follows
-		# the link into the absolute /nix/store target that does not exist
-		# on the host, so the install dies with
-		#   etc/hosts: open failed: ENOENT (No such file or directory)
-		# while every write into a real file in the same directory succeeds.
-		# The other /etc links are fine: proot resolves absolute targets
-		# inside the guest, and nothing on the host ever follows them.
+		# The app writes five files into /etc on the host at install time
+		# (DistroInstaller: passwd, group, hosts, resolv.conf, fstab). A Java
+		# File follows a link into the absolute /nix/store target that does
+		# not exist on the host, so every one of the five dies with
+		#   etc/<f>: open failed: ENOENT (No such file or directory)
+		# while writes into real files in the same directory succeed. hosts
+		# got this treatment alone first, and the install simply moved on to
+		# fstab; all five are real files now. The other /etc links stay
+		# links: proot resolves their targets against the tree root, and
+		# nothing on the host ever follows them.
 		rm -f "${rootfs}/etc/hosts"
 		printf '127.0.0.1 localhost\n::1 localhost\n' > "${rootfs}/etc/hosts"
-		chmod 644 "${rootfs}/etc/profile" "${rootfs}/etc/bashrc" "${rootfs}/etc/passwd" "${rootfs}/etc/group" "${rootfs}/etc/resolv.conf" "${rootfs}/etc/hosts"
+		rm -f "${rootfs}/etc/fstab"
+		if [ -e "${etcdir}/fstab" ]; then
+			cp -L "${etcdir}/fstab" "${rootfs}/etc/fstab"
+		else
+			printf '' > "${rootfs}/etc/fstab"
+		fi
+		chmod 644 "${rootfs}/etc/profile" "${rootfs}/etc/bashrc" "${rootfs}/etc/passwd" "${rootfs}/etc/group" "${rootfs}/etc/resolv.conf" "${rootfs}/etc/hosts" "${rootfs}/etc/fstab"
 
 		# NixOS materialises /etc/ssl/certs at boot, in a store directory that
 		# ships *empty*: the ca-bundle.crt is written by a service a proot tree
@@ -214,13 +222,16 @@ bootstrap_distribution() {
 
 		archive_rootfs "$tarball" "$rootfs_dir"
 
-		# If hosts is a link in the archive again, the install dies on the
-		# host's first write to it. The archive's own type column says so:
-		# a regular file starts with -, a link with l.
-		if ! tar -tvJf "$tarball" | grep -E "^-r.* ${rootfs_dir}/etc/hosts$" ; then
-			echo "[!] ${arch}: etc/hosts is not a regular file in the archive; the app cannot write it on the host." >&2
-			exit 1
-		fi
+		# The app writes these five /etc files on the host at install time;
+		# each must be a regular file in the archive, or the write dies with
+		# ENOENT behind the link. The list is DistroInstaller's write set --
+		# keep the two in step.
+		for f in passwd group hosts resolv.conf fstab; do
+			if ! tar -tvJf "$tarball" | grep -qE "^-r.* ${rootfs_dir}/etc/${f}\$"; then
+				echo "[!] ${arch}: etc/${f} is not a regular file in the archive; the app writes it on the host." >&2
+				exit 1
+			fi
+		done
 		echo "[*] Built $tarball"
 	done
 	unset arch
