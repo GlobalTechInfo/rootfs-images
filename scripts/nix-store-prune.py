@@ -28,6 +28,11 @@ KEEP_TOOLS = [
     "vim", "vi", "sudo", "tar", "git", "gzip", "xz", "bzip2", "unzip",
     "which", "ps", "top", "curl", "ssh", "scp", "sftp", "ssh-keygen",
     "ip", "ss", "ping", "htop", "tree",
+    # The nix package and its closure: the session must be able to install
+    # packages, not only run a frozen tool set. All of these names ship in
+    # the nix package's bin directory, so they resolve to one store path.
+    "nix", "nix-env", "nix-build", "nix-channel", "nix-shell", "nix-store",
+    "nix-hash", "nixos-rebuild",
 ]
 
 # Kept by name, not reachable through any NEEDED entry.
@@ -160,6 +165,17 @@ def main():
     for needle in KEEP_PATHS:
         keep.update(p for p in paths if needle in p)
 
+    # Extra keeps, passed by the caller for things only a config file
+    # references: the registry's nixpkgs source, for instance, which the
+    # link walk cannot see. Colons are not in store path names.
+    if len(sys.argv) > 2:
+        for extra in sys.argv[2].split(":"):
+            extra = extra.strip()
+            if extra:
+                if extra not in paths:
+                    print(f"[nix-prune] extra keep {extra} is not in the store; skipping")
+                keep.add(extra)
+
     # Seed from the farm's own links: a tool's first hop is the store path
     # that carries it.
     # Second pass over everything outside the store: follow each link's
@@ -203,6 +219,19 @@ def main():
                 first = target[len("/nix/store/"):].split("/")[0]
                 if first in paths:
                     keep.add(first)
+                    # The tool's binary may itself be a link into another
+                    # store path: per-system nix packages share one real
+                    # binary, so the farm package's bin/nix links into the
+                    # binary package. Keeping only the farm package ships
+                    # a dangling link, and every nix command dies the
+                    # first time it is run with No such file or directory.
+                    real = os.path.join(store, first, "bin", tool)
+                    while os.path.islink(real):
+                        rt = os.readlink(real)
+                        if not rt.startswith("/nix/store/"):
+                            break
+                        keep.add(rt.split("/")[3])
+                        real = os.path.join(store, rt.split("/")[3], "bin", tool)
                     continue
         missing.append(tool)
 

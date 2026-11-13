@@ -135,8 +135,34 @@ bootstrap_distribution() {
 			ln -sf "/nix/store/${etc}/etc/$(basename "$f")" "${rootfs}/etc/$(basename "$f")"
 		done
 		rm -f "${rootfs}/etc/profile" "${rootfs}/etc/bashrc"
-		printf 'export PATH="/bin:/sbin:/usr/bin:/usr/sbin"\nexport SHELL=/bin/bash\n' > "${rootfs}/etc/profile"
-		printf 'export PATH="/bin:/sbin:/usr/bin:/usr/sbin"\n' > "${rootfs}/etc/bashrc"
+		# The nix tools are not in this minimal system's /bin farm, but the
+		# pruner keeps the package regardless; put its bin on the PATH as
+		# its own entry so `nix`, `nix-env` and friends are reachable.
+		# Guest-relative: /nix/store/<path>/bin, not the build host's path.
+		# Resolve through the system's software farm, the same way the
+		# pruner does, and follow the binary chain to its end: the farm's
+		# nix package links its binaries into the shared binary package,
+		# and only the end of the chain is the file that actually runs.
+		nixlink="${rootfs}/nix/store/${farm}/bin/nix"
+		nixpath=""
+		if [ -L "$nixlink" ]; then
+			real="${rootfs}$(readlink "$nixlink")"
+			while [ -L "$real" ]; do
+				rt="$(readlink "$real")"
+				case "$rt" in
+					/nix/store/*) real="${rootfs}${rt}" ;;
+					*) real="" ; break ;;
+				esac
+			done
+			[ -n "$real" ] && [ -f "$real" ] && nixpath="${real#"${rootfs}"}" && nixpath="${nixpath%/bin/nix}/bin"
+		fi
+		if [ -n "$nixpath" ]; then
+			printf 'export PATH="%s:/bin:/sbin:/usr/bin:/usr/sbin"\nexport SHELL=/bin/bash\n' "$nixpath" > "${rootfs}/etc/profile"
+			printf 'export PATH="%s:/bin:/sbin:/usr/bin:/usr/sbin"\n' "$nixpath" > "${rootfs}/etc/bashrc"
+		else
+			printf 'export PATH="/bin:/sbin:/usr/bin:/usr/sbin"\nexport SHELL=/bin/bash\n' > "${rootfs}/etc/profile"
+			printf 'export PATH="/bin:/sbin:/usr/bin:/usr/sbin"\n' > "${rootfs}/etc/bashrc"
+		fi
 		printf 'root:x:0:0:root:/root:/bin/bash\nnobody:x:65534:65534:Nobody:/:/bin/false\n' > "${rootfs}/etc/passwd"
 		printf 'root:x:0:\nnobody:x:65534:\nnixbld:x:30000:\n' > "${rootfs}/etc/group"
 		printf 'nameserver 1.1.1.1\n' > "${rootfs}/etc/resolv.conf"
@@ -159,6 +185,51 @@ bootstrap_distribution() {
 			printf '' > "${rootfs}/etc/fstab"
 		fi
 		chmod 644 "${rootfs}/etc/profile" "${rootfs}/etc/bashrc" "${rootfs}/etc/passwd" "${rootfs}/etc/group" "${rootfs}/etc/resolv.conf" "${rootfs}/etc/hosts" "${rootfs}/etc/fstab"
+
+		# nix.conf: the system's config assumes a machine. sandbox needs
+		# unshare(2), which proot cannot give; build-users assumes a build
+		# group the tree has no; and `nix shell nixpkgs#X` (the way a
+		# session installs what it wants) resolves through the registry,
+		# which needs the flakes feature.
+		#
+		# /etc/nix is a farm link into the store, and the store's modes
+		# come with it: cp -a copies the directory at 0555 and nix.conf at
+		# 0444 (or as a link into a 0555 store directory), so neither the
+		# copy nor the append can write anything until both are real,
+		# owner-writable files. The trap the /etc block above documents,
+		# two levels down.
+		rm -f "${rootfs}/etc/nix"
+		if [ -d "${etcdir}/nix" ]; then
+			cp -a "${etcdir}/nix" "${rootfs}/etc/nix"
+			chmod 755 "${rootfs}/etc/nix"
+		fi
+		conf="${rootfs}/etc/nix/nix.conf"
+		if [ -L "$conf" ]; then
+			# A link into the store: materialise the file, or the append
+			# writes into a shared store path the prune may remove. The
+			# target is absolute (/nix/store/...), which does not resolve
+			# on the host, so copy it through the tree's own store.
+			tgt="$(readlink "$conf")"
+			cp -a "${rootfs}${tgt}" "${conf}.in"
+			rm -f "$conf"
+			mv "${conf}.in" "$conf"
+		fi
+		if [ -f "$conf" ]; then
+		# The system config pins sandbox and a nixbld build group the tree
+		# has no; nix reads the last value of a key, so drop those lines
+		# and write one consistent set. An empty build-users-group is how
+		# nix 2.34 turns build users off -- it has no build-users setting,
+		# and the group's absence is what the old config's warning named.
+		# sed -i restores the store's 0444 mode, so the chmod the append
+		# depends on comes after it.
+			sed -i '/^sandbox = /d; /^build-users/d' "$conf"
+			chmod 644 "$conf"
+			{
+				echo 'sandbox = false'
+				echo 'experimental-features = nix-command flakes'
+				echo 'build-users-group ='
+			} >> "$conf"
+		fi
 
 		# NixOS materialises /etc/ssl/certs at boot, in a store directory that
 		# ships *empty*: the ca-bundle.crt is written by a service a proot tree
@@ -189,7 +260,36 @@ bootstrap_distribution() {
 		# the store to the dynamic closure of a curated tool set plus the
 		# system's /etc chain: 5.2 GB down to ~550 MB on 26.05, without
 		# touching any binary a kept tool loads at run time.
-		"${SCRIPT_DIR}/nix-store-prune.py" "${rootfs}"
+		# The registry names where `nixpkgs` lives: a path: input into this
+		# store. Nothing links to that path, so the pruner's walks cannot
+		# see it, and `nix shell nixpkgs#X` would die fetching a source the
+		# prune just removed. Pass it through as an explicit keep.
+		regfile="$(readlink "${rootfs}/etc/nix/registry.json" 2>/dev/null || true)"
+		extrak=""
+		case "$regfile" in
+			/nix/store/*)
+				extrak="$(python3 -c '
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+except Exception:
+    sys.exit(0)
+extras = []
+for e in d.get("flakes", []):
+    # v2 entries: {"from": {...}, "to": {"path": "/nix/store/<h>/...", "type": "path"}}
+    p = e.get("to", {}).get("path", "")
+    if p.startswith("/nix/store/"):
+        extras.append(p.split("/")[3])
+    # v1 entries: {"original": "path:/nix/store/<h>/..."}
+    o = e.get("original", "")
+    if o.startswith("path:/nix/store/"):
+        extras.append(o.split("/")[2])
+if extras:
+    print(":".join(extras))
+' "${rootfs}${regfile}" 2>/dev/null)"
+				;;
+		esac
+		"${SCRIPT_DIR}/nix-store-prune.py" "${rootfs}" "$extrak"
 
 		"${SCRIPT_DIR}/verify-rootfs.sh" "${WORKDIR}/${rootfs_dir}" "NixOS"
 
@@ -197,6 +297,13 @@ bootstrap_distribution() {
 		# image carries no channel closure. The no-op command keeps the bake's
 		# other jobs, the first-start marker and the sudo shim, which are the
 		# part RedTerm actually checks.
+		# NixOS has no /usr: the bake's sudo shim targets usr/bin/sudo.
+		# Create a real usr/bin first — it is the one writable directory
+		# on the guest's PATH, so the shim lands where PATH finds it, and
+		# the app's install-time SUDO_SHIM can rewrite it like every other
+		# image.
+		mkdir -p "${rootfs}/usr/bin"
+
 		"${SCRIPT_DIR}/bake-first-start.sh" "${WORKDIR}/${rootfs_dir}" ":"
 
 		# bake refused to write the marker on this tree: its host-side
@@ -207,8 +314,12 @@ bootstrap_distribution() {
 		# elements NUL-joined. If the app's nixos plan ever changes, the
 		# stale marker costs one re-run of a no-op block, which is the
 		# marker's designed failure mode.
+		# A full-branch bake (bash resolvable) leaves a root-owned
+		# .init_done behind; the write below runs as the build user and
+		# cannot overwrite it, so remove it first.
 		local token
 		token="$(printf ':\000\000\000\000' | sha256sum | cut -c1-16)"
+		sudo rm -f "${rootfs}/root/.init_done"
 		printf '%s' "$token" > "${rootfs}/root/.init_done"
 		chmod 644 "${rootfs}/root/.init_done"
 
@@ -232,6 +343,13 @@ bootstrap_distribution() {
 				exit 1
 			fi
 		done
+
+		# nix itself: the whole point of shipping it is that a session can
+		# install packages, so the binary must actually be in the archive.
+		if ! tar -tJf "$tarball" | grep -qE "${rootfs_dir}/nix/store/[^/]+/bin/nix\$"; then
+			echo "[!] ${arch}: no nix binary in the archive; the session cannot install packages." >&2
+			exit 1
+		fi
 		echo "[*] Built $tarball"
 	done
 	unset arch
