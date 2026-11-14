@@ -26,10 +26,12 @@
 # stable kernel and an experimental one; the build deterministically picks
 # the lower kernel version.
 #
-# Pinned: the nixos-26.05 channel as of 2026-11-11, both ISOs
+# Pinned: the nixos-26.05 channel as of 2026-11-14, both ISOs
 # sha256-checked below. The channel moves, so the shas and URLs here are a
 # snapshot: when a rebuild is wanted, update the URL and the sha together,
-# which is also when the nixos-system selection is re-checked.
+# which is also when the nixos-system selection is re-checked. The 2026-11-11
+# pin went stale three days later, which is the expected life of a latest
+# alias, not an anomaly.
 #
 # The minimal ISO's store is the closure of a whole bootable system, and a
 # proot session starts a shell, not a machine. The build prunes the store
@@ -48,16 +50,16 @@ dist_version="26.05"
 distro_arches="aarch64 x86_64"
 
 # channels.nixos.org's latest-<arch> alias, pinned with the sha256 of the ISO
-# it resolved to on 2026-11-11.
+# it resolved to on 2026-11-14.
 nixos_source_for() {
 	case "$1" in
 		aarch64)
 			echo "https://channels.nixos.org/nixos-26.05/latest-nixos-minimal-aarch64-linux.iso"
-			echo "4244322fb3de8e1775ba070e577c1e2960a22b6bdf32b9b74c7eb309d38bee62"
+			echo "0a76b55998657c320070804a611af9b2b7ce35d30c93c86b79d5c24e7c510752"
 			;;
 		x86_64)
 			echo "https://channels.nixos.org/nixos-26.05/latest-nixos-minimal-x86_64-linux.iso"
-			echo "1beb3e006ad420f351fdcb5449ce6dc0504c37ef64b85f418e2bc0884249ac8f"
+			echo "24a8a462db3e08dd403a80031d6a151645dfe8eff4c3459e9acaf2d98b796a00"
 			;;
 		*) echo "nixos_source_for(): unknown arch '$1'" >&2; exit 1;;
 	esac
@@ -166,6 +168,28 @@ bootstrap_distribution() {
 		printf 'root:x:0:0:root:/root:/bin/bash\nnobody:x:65534:65534:Nobody:/:/bin/false\n' > "${rootfs}/etc/passwd"
 		printf 'root:x:0:\nnobody:x:65534:\nnixbld:x:30000:\n' > "${rootfs}/etc/group"
 		printf 'nameserver 1.1.1.1\n' > "${rootfs}/etc/resolv.conf"
+
+		# The openssl curl in the store was configured against its own
+		# prefix, which the prune removes, so its compiled-in CA paths are
+		# dead and every HTTPS fetch dies with "unable to get local issuer
+		# certificate" (curl rc=60), measured. The nss-cacert bundle that
+		# /etc/ssl/certs links to is kept by the pruner; naming it through
+		# the environment is what curl and the openssl users (git, go,
+		# python) actually consult.
+		printf 'export CURL_CA_BUNDLE=/etc/ssl/certs/ca-bundle.crt\nexport SSL_CERT_FILE=/etc/ssl/certs/ca-bundle.crt\n' >> "${rootfs}/etc/profile"
+		printf 'export CURL_CA_BUNDLE=/etc/ssl/certs/ca-bundle.crt\nexport SSL_CERT_FILE=/etc/ssl/certs/ca-bundle.crt\n' >> "${rootfs}/etc/bashrc"
+
+		# A system channel table, tab-separated, as every NixOS system has.
+		# The nixpkgs-26.05 channel alias is dead (404 from nixos.org; the
+		# nixpkgs series has moved on); nixpkgs-unstable is the live one
+		# (measured 302 -> channels.nixos.org, and nix follows
+		# it to a download that reaches the unpack step). Package
+		# installation in the proot session goes through the registry-based
+		# commands (nix profile install / nix shell / nix run), which work;
+		# the legacy channel *unpack* (nix-channel --update, nix-env) cannot
+		# finish under proot, so the table's job here is environment
+		# completeness, not update-ability.
+		printf 'nixpkgs\thttps://nixos.org/channels/nixpkgs-unstable\n' > "${rootfs}/etc/channels"
 		# The app writes five files into /etc on the host at install time
 		# (DistroInstaller: passwd, group, hosts, resolv.conf, fstab). A Java
 		# File follows a link into the absolute /nix/store target that does
