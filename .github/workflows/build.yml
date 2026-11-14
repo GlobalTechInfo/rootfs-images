@@ -303,12 +303,12 @@ jobs:
           # record to keep in step -- it is the sha256 of the bytes the release holds.
           # The index stops asserting anything the build happened to observe, and
           # cannot describe a release that does not exist.
-          python3 scripts/sync-index-from-release.py --index images/index.json --tag "$TAG"
-
-          # Unmatched globs stay literal under bash, so a recipe that produced nothing
-          # makes gh name a file that does not exist and the upload fails, rather than
-          # a release quietly missing images.
-          gh release upload "$TAG" images/index.json --clobber
+          #
+          # It must run AFTER the image upload: stamping from the release while it
+          # still holds the previous generation writes the old digest onto the
+          # rebuilt entries. The 2026-11-14 nixos run did exactly that -- new
+          # tarballs published under the previous generation's shas, which makes
+          # the app refuse every nixos install as a corrupt download.
           # Images only. The distro-plugins/*.sh were uploaded because
           # proot-distro's releases carry them and the layout was copied wholesale.
           # Nothing in RedTerm reads them: ProotLaunch.kt and DistroSetup.kt
@@ -316,9 +316,16 @@ jobs:
           # are only meaningful to someone running these images with upstream
           # proot-distro, which is not what this repository publishes for.
           #
+          # Unmatched globs stay literal under bash, so a recipe that produced nothing
+          # makes gh name a file that does not exist and the upload fails, rather than
+          # a release quietly missing images.
+          gh release upload "$TAG" rootfs/*.tar.xz --clobber
+
+          python3 scripts/sync-index-from-release.py --index images/index.json --tag "$TAG"
+
           # index.json is the exception and stays: RedTermCatalog fetches it from the
           # release URL at runtime, and it is how the app learns which images exist.
-          gh release upload "$TAG" rootfs/*.tar.xz --clobber
+          gh release upload "$TAG" images/index.json --clobber
 
           echo "Release $TAG now carries $(gh release view "$TAG" --json assets --jq '.assets | length') assets"
 
