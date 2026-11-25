@@ -11,7 +11,7 @@
 # 32-bit for some time.
 
 dist_name="openSUSE"
-dist_version="16.0"
+dist_version="16.1"
 distro_arches="aarch64 x86_64"
 
 # The per-architecture digest of the multi-arch tag.
