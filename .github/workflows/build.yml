@@ -118,7 +118,7 @@ jobs:
           # Needed by the Debian-family recipes. Installed from the archive rather
           # than apt because the version upstream pins is no longer current.
           curl -fsSL -o /tmp/mmdebstrap.deb \
-            http://ftp.us.debian.org/debian/pool/main/m/mmdebstrap/mmdebstrap_1.5.7-3_all.deb
+            https://deb.debian.org/debian/pool/main/m/mmdebstrap/mmdebstrap_1.7.0-8_all.deb
           sudo dpkg -i /tmp/mmdebstrap.deb
 
           # mmdebstrap is the one recipe that has to *run* target-architecture code:
