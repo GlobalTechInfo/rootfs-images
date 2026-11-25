@@ -197,7 +197,7 @@ bootstrap_distribution() {
 		#
 		# A package that owns one of these restores it on upgrade, which brings the
 		# error lines back; the transaction still succeeds.
-		sudo find "${WORKDIR}/$${rootfs_dir}/usr/share/libalpm/hooks" -maxdepth 1 -type f \
+		sudo find "${WORKDIR}/${rootfs_dir}/usr/share/libalpm/hooks" -maxdepth 1 -type f \
 			-name '*-systemd-*.hook' -delete 2>/dev/null || true
 
 		image_meta "$tarball" "arch" "$arch" "20260517" \
