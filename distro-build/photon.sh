@@ -37,7 +37,7 @@ bootstrap_distribution() {
 			mount --bind /proc "${WORKDIR}/${rootfs_dir}/proc"
 			mount --bind /sys "${WORKDIR}/${rootfs_dir}/sys"
 			chroot "${WORKDIR}/${rootfs_dir}" tdnf -y update
-			chroot "${WORKDIR}/${rootfs_dir}" tdnf -y install passwd util-linux sudo
+			chroot "${WORKDIR}/${rootfs_dir}" tdnf -y install shadow util-linux sudo
 			chroot "${WORKDIR}/${rootfs_dir}" tdnf clean all
 		EOF
 

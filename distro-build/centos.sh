@@ -1,7 +1,8 @@
-# CentOS Stream 10 Minimal, 10.
+# CentOS Stream 10, 10.
 #
-# Source is quay.io/centos/centos:stream10-minimal, built by osbuild. It ships
-# dnf (not microdnf or tdnf), bash, coreutils-single, and SELinux policy.
+# Source is quay.io/centos/centos:stream10, built by osbuild. It ships
+# dnf (not microdnf or tdnf), bash, and SELinux policy. The minimal variant
+# (stream10-minimal) has no dnf binary, so the full image is used.
 #
 # Arch: aarch64 and x86_64. The upstream manifest list also carries ppc64le
 # and s390x, but RedTerm ships the two 64-bit common architectures only.
@@ -18,8 +19,8 @@ distro_arches="aarch64 x86_64"
 # for arm or i686.
 image_ref_for() {
 	case "$1" in
-		aarch64) echo "quay.io/centos/centos:stream10-minimal";;
-		x86_64)  echo "quay.io/centos/centos:stream10-minimal";;
+		aarch64) echo "quay.io/centos/centos:stream10";;
+		x86_64)  echo "quay.io/centos/centos:stream10";;
 		*) echo "CentOS Stream: no image for $1" >&2; exit 1;;
 	esac
 }
